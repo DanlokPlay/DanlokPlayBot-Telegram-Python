@@ -1,5 +1,6 @@
 API_TOKEN = '6064246639:AAE-9Np2IM6rSAXlCOoxql6rgeLNd1QKcZI'
-CHANNEL_URL = 'https://t.me/KatomanD'
-CHANNEL_ID = '@KatomanD'
-CHAT_ID = '-1001969870941'
+#CHANNEL_URL = 'https://t.me/KatomanD'
+#CHANNEL_ID = '@KatomanD'
+#CHAT_ID = '-1001969870941'
 ADMIN_ID = '1375077159'
+#API_URL = "https://api.telegram.org/bot{}/sendMessage".format(token)
