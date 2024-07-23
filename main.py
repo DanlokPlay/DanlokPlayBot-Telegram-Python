@@ -1,92 +1,576 @@
-from config import *
+from config import API_TOKEN, DEVELOPER_ID, LOG_FILE, TEMP_LOG_FILE, LOG_INTERVAL, CHECK_FOLDER, INFO_FOLDER, APK_FOLDER
 from datetime import datetime
 import time
-import requests
 from random import randint
+import random
+
+
+import os
+import gc
+import glob
 
 import telebot
+from telebot import types
+
+import threading
+import schedule
+
 
 
 token = API_TOKEN
 bot = telebot.TeleBot(token)
 
-def set_webhook_with_delay():
-    time.sleep(1)
-    bot.set_webhook()
 
 
-API_URL = "https://api.telegram.org/bot{}/sendMessage".format(token)
+
 
 print('OK')
 
-def send_message_with_retry(chat_id, text):
-    retries = 3
-    delay = 1  # Initial delay in seconds
-
-    for _ in range(retries):
-        response = requests.post(API_URL, data={"chat_id": chat_id, "text": text})
-        if response.status_code == 200:
-            return
-        elif response.status_code == 429:
-            print("Rate limit exceeded. Retrying after {} seconds.".format(delay))
-            time.sleep(delay)
-            delay *= 2  # Exponential backoff
-        else:
-            # Handle other types of errors
-            print("Unexpected error:", response.status_code)
-            return
-
-    print("Max retries exceeded. Unable to send message.")
 
 
 
-@bot.message_handler(commands=['info', 'инфо'])
-def start_info(message):
-    bot.send_message(message.chat.id, '/код(к) - код на сегодня от БА\n/доп_инфо(ди)', reply_to_message_id=message.id)
-        
-    chat_name = message.chat.title if message.chat.title else message.chat.username
-    username = message.from_user.username if message.from_user.username else message.from_user.first_name
-    notification_text = f'(!инфо) Информация о командах просмотрена @{username} в чате <a href="https://t.me/{chat_name}">{chat_name}</a>'
-    bot.send_message(1375077159, notification_text, parse_mode='HTML')
-    print("Информация о командах выслана!")
 
-
-@bot.message_handler(commands=['additional_info', 'допинфа', 'ди', 'допинфо', 'доп_инфо', 'долнительная_информация', 'информация'])
-def start_additional_info(message):
-    bot.send_message(message.chat.id, '/коды - коды на текущий месяц \n/фото(ф) название_фото - отсылает нужную фотографию \n/кеф(пр_фото) - отсылает все существующие названия фото, которые загружены \n/монета(м) - подросить монету (Орёл или Решка) \n/записать_коды (YYYY_MM; D:CODE)(только @DanlokPlay) \n/загрузить_фото "название фото" (Для кодов: Месяц Год)(только @DanlokPlay)', reply_to_message_id=message.id)
-    #\n/загрузить_фото название фото (Для кодов EN: codes_mounth_year)(только @DanlokPlay)
-    chat_name = message.chat.title if message.chat.title else message.chat.username
-    username = message.from_user.username if message.from_user.username else message.from_user.first_name
-    notification_text = f'(!инфо) Информация о Дополнительных командах просмотрена @{username} в чате <a href="https://t.me/{chat_name}">{chat_name}</a>'
-    bot.send_message(1375077159, notification_text, parse_mode='HTML')
-    print("Информация о Дополнительных командах выслана!")
-
-def read_codes_from_file(filename):
-    codes = {}
+def is_chat_admin(bot, chat_id, user_id):
     try:
-        with open(filename, 'r') as file:
-            lines = file.readlines()
-            for line in lines:
-                year_month, codes_str = line.strip().split('::')
-                year, month = map(int, year_month.split('_'))
-                
-                day_codes = {}
-                for day_code in codes_str.split(','):
-                    day, code = day_code.split(':')
-                    day_codes[int(day)] = code
-                codes[(year, month)] = day_codes
-    except FileNotFoundError:
-        print(f"File '{filename}' not found.")
-    except ValueError:
-        print(f"Invalid data format in '{filename}'.")
-    
-    return codes
+        chat_admins = bot.get_chat_administrators(chat_id)
+        return any(admin.user.id == user_id for admin in chat_admins)
+    except Exception as e:
+        print(f"Не удалось получить список администраторов: {e}")
+        return False
 
-codes = read_codes_from_file('codes.txt')
+def check_access(chat_id, command):
+    with sqlite3.connect('chat_servers.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute(f'SELECT {command} FROM access_to_commands WHERE chat_id = ?', (chat_id,))
+        result = cursor.fetchone()
+        return result and result[0]
+
+def get_command_cooldown(chat_id, command):
+    command_column = f'cd_{command}'
+    with sqlite3.connect('chat_servers.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute(f'SELECT {command_column} FROM command_cooldowns WHERE chat_id = ?', (chat_id,))
+        result = cursor.fetchone()
+        return result[0] if result else 5  # Значение КД по умолчанию 5 секунд
+
+def set_command_cooldown(chat_id, command, cooldown_duration):
+    command_column = f'cd_{command}'
+    with sqlite3.connect('chat_servers.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute(f'''
+            UPDATE command_cooldowns
+            SET {command_column} = ?
+            WHERE chat_id = ?
+        ''', (cooldown_duration, chat_id))
+        conn.commit()
+
+last_command_execution_time = {}
+
+def cool_down(message, command):
+    chat_id = message.chat.id
+    current_time = datetime.now()
+
+    command_cooldown = get_command_cooldown(chat_id, command)
+
+    if chat_id < 0:
+        if chat_id not in last_command_execution_time:
+            last_command_execution_time[chat_id] = {}
+
+        if command in last_command_execution_time[chat_id]:
+            time_since_last_execution = (current_time - last_command_execution_time[chat_id][command]).total_seconds()
+            remaining_cooldown = command_cooldown - time_since_last_execution
+            if remaining_cooldown > 0:
+                bot.reply_to(message, f"Подождите еще {int(remaining_cooldown)} секунд перед использованием этой команды.")
+                return False
+
+        last_command_execution_time[chat_id][command] = current_time
+
+    return True
+
+
+
+def debug_message(message, additional_text):
+    chat_name = message.chat.title if message.chat.title else message.chat.username
+    username = message.from_user.username if message.from_user.username else message.from_user.first_name
+    notification_text = f'{additional_text} @{username} в чате <a href="https://t.me/{chat_name}">{chat_name}</a>'
+    # Отправка сообщения разработчику
+    if additional_text == 'Спасибо от ':
+        bot.send_message(DEVELOPER_ID, f'Спасибо от @{username}')
+
+
+    # Запись в лог-файл
+    log_entry = f'{datetime.now()} - {notification_text}\n'
+    with open(LOG_FILE, 'a', encoding='utf-8') as log_file:
+        log_file.write(log_entry)
+    with open(TEMP_LOG_FILE, 'a', encoding='utf-8') as temp_log_file:
+        temp_log_file.write(log_entry)
+
+
+
+
+
+import sqlite3
+
+# Регистрация обработчика сообщений
+#@bot.message_handler(func=lambda message: message)
+def handle_message(message):
+    user_id = message.from_user.id
+    username = message.from_user.username
+    chat_id = message.chat.id
+    chat_name = message.chat.title if message.chat.title else None
+    creator_id = message.from_user.id
+    creator_username = message.from_user.username
+
+    if message.chat.type != 'private':
+        with sqlite3.connect('chat_servers.db') as conn:
+            cursor = conn.cursor()
+
+            try:
+                admins = bot.get_chat_administrators(chat_id)
+                admin_ids = ",".join([str(admin.user.id) for admin in admins])
+                admin_usernames = ",".join([admin.user.username for admin in admins if admin.user.username is not None])
+            except Exception as e:
+                print(f"Не удалось получить список администраторов: {e}")
+                admin_ids = ""
+                admin_usernames = ""
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS chats (
+                    chat_id INTEGER PRIMARY KEY,
+                    chat_name TEXT,
+                    creator_id INTEGER,
+                    creator_username TEXT,
+                    admin_ids TEXT,
+                    admin_usernames TEXT
+                )
+            ''')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS access_to_commands (
+                    chat_id INTEGER PRIMARY KEY,
+                    chat_name TEXT,
+                    thank_you BOOLEAN DEFAULT TRUE,
+                    info_custom BOOLEAN DEFAULT TRUE,
+                    info_admin BOOLEAN DEFAULT TRUE,
+                    info_developer BOOLEAN DEFAULT TRUE,
+                    code BOOLEAN DEFAULT TRUE,
+                    codes BOOLEAN DEFAULT TRUE,
+                    coin BOOLEAN DEFAULT TRUE,
+                    upload_photo BOOLEAN DEFAULT TRUE,
+                    photo BOOLEAN DEFAULT TRUE,
+                    video BOOLEAN DEFAULT TRUE,
+                    kef BOOLEAN DEFAULT TRUE,
+                    kev BOOLEAN DEFAULT TRUE,
+                    all_updates BOOLEAN DEFAULT TRUE,
+                    latest_update BOOLEAN DEFAULT TRUE,
+                    top BOOLEAN DEFAULT TRUE,
+                    roulette BOOLEAN DEFAULT TRUE,
+                    hey BOOLEAN DEFAULT TRUE,
+                    raids BOOLEAN DEFAULT TRUE
+                )
+            ''')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS command_cooldowns (
+                    chat_id INTEGER PRIMARY KEY,
+                    chat_name TEXT,
+                    cd_thank_you INTEGER DEFAULT 5,
+                    cd_info_custom INTEGER DEFAULT 5,
+                    cd_info_admin INTEGER DEFAULT 5,
+                    cd_info_developer INTEGER DEFAULT 5,
+                    cd_code INTEGER DEFAULT 5,
+                    cd_codes INTEGER DEFAULT 5,
+                    cd_coin INTEGER DEFAULT 5,
+                    cd_upload_photo INTEGER DEFAULT 5,
+                    cd_photo INTEGER DEFAULT 5,
+                    cd_video INTEGER DEFAULT 5,
+                    cd_kef INTEGER DEFAULT 5,
+                    cd_kev INTEGER DEFAULT 5,
+                    cd_all_updates INTEGER DEFAULT 5,
+                    cd_latest_update INTEGER DEFAULT 5,
+                    cd_top INTEGER DEFAULT 5,
+                    cd_roulette INTEGER DEFAULT 5,
+                    cd_hey INTEGER DEFAULT 5,
+                    cd_raids INTEGER DEFAULT 5
+                )
+            ''')
+
+            cursor.execute('SELECT * FROM chats WHERE chat_id = ?', (chat_id,))
+            existing_chat = cursor.fetchone()
+
+            if not existing_chat:
+                cursor.execute('''
+                    INSERT INTO chats (
+                        chat_id, chat_name, creator_id, creator_username, admin_ids, admin_usernames
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                ''', (chat_id, chat_name, creator_id, creator_username, admin_ids, admin_usernames))
+                conn.commit()
+                print(f"Добавлен новый чат: {chat_id}")
+                debug_message(message, f"Добавлен новый чат: {chat_id}")
+
+                cursor.execute('''
+                    INSERT INTO access_to_commands (
+                        chat_id, chat_name
+                    ) VALUES (?, ?)
+                ''', (chat_id, chat_name))
+                conn.commit()
+
+                cursor.execute('''
+                    INSERT INTO command_cooldowns (
+                        chat_id, chat_name
+                    ) VALUES (?, ?)
+                ''', (chat_id, chat_name))
+                conn.commit()
+
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS chat_admins (
+                        chat_id INTEGER,
+                        admin_id INTEGER,
+                        admin_username TEXT,
+                        PRIMARY KEY (chat_id, admin_id)
+                    )
+                ''')
+
+                for admin in admins:
+                    cursor.execute('''
+                        INSERT INTO chat_admins (chat_id, admin_id, admin_username)
+                        VALUES (?, ?, ?)
+                    ''', (chat_id, admin.user.id, admin.user.username))
+                conn.commit()
+            else:
+                print(f"Чат уже существует: {chat_id}")
+
+                cursor.execute('SELECT admin_id FROM chat_admins WHERE chat_id = ?', (chat_id,))
+                existing_admin_ids = [row[0] for row in cursor.fetchall()]
+
+                current_admin_ids = [admin.user.id for admin in admins]
+
+                if set(existing_admin_ids) != set(current_admin_ids):
+                    cursor.execute('DELETE FROM chat_admins WHERE chat_id = ?', (chat_id,))
+                    for admin in admins:
+                        cursor.execute('''
+                            INSERT INTO chat_admins (chat_id, admin_id, admin_username)
+                            VALUES (?, ?, ?)
+                        ''', (chat_id, admin.user.id, admin.user.username))
+                    conn.commit()
+                    print(f"Обновлен список администраторов для чата: {chat_id}")
+
+    with sqlite3.connect('users.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY,
+                username TEXT,
+                name TEXT,
+                surname TEXT,
+                survival_points INTEGER DEFAULT 0
+            )
+        ''')
+
+        cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
+        existing_user = cursor.fetchone()
+
+        if existing_user:
+            if existing_user[1] != username:
+                cursor.execute('UPDATE users SET username = ? WHERE id = ?', (username, user_id))
+            if message.from_user.first_name:
+                cursor.execute('UPDATE users SET name = ? WHERE id = ?', (message.from_user.first_name, user_id))
+            if message.from_user.last_name:
+                cursor.execute('UPDATE users SET surname = ? WHERE id = ?', (message.from_user.last_name, user_id))
+            conn.commit()
+        else:
+            cursor.execute('INSERT INTO users (id, username, name, surname) VALUES (?, ?, ?, ?)', (user_id, username, message.from_user.first_name, message.from_user.last_name))
+            conn.commit()
+            print(f"Добавлен новый пользователь: {user_id}")
+            debug_message(message, f"Добавлен новый пользователь: {user_id}")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#######################                     ОБЩИЕ (без ограничений где-либо и как-либо)                      ############################
+
+
+@bot.message_handler(commands=['start', 'старт'])
+def start(message):
+    handle_message(message)
+
+    command_name = 'start'
+
+    path_file = INFO_FOLDER + command_name + ".txt"
+
+    with open(path_file, 'r', encoding='utf-8') as file:
+        start_text = file.read()
+
+    bot.send_message(message.chat.id, start_text)
+
+    debug_message(message, 'Пользователь использовал /start')
+    print("Пользователь использовал /start")
+
+
+
+
+
+@bot.message_handler(commands=['с_команды', 's_commands'])
+def command_list(message):
+    handle_message(message)
+    
+    chat_id = message.chat.id
+
+    if message.chat.type not in ('group', 'supergroup'):
+        bot.reply_to(message, "Команда /s_commands может использоваться только в групповых чатах!")
+        debug_message(message, "Команда /s_commands использована НЕ в групповом чате!")
+        return
+    
+    with sqlite3.connect('chat_servers.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM access_to_commands WHERE chat_id = ?', (chat_id,))
+        result = cursor.fetchone()
+        
+        if result:
+            commands_status = {
+                "thank_you": result[2],
+                "info_custom": result[3],
+                "info_admin": result[4],
+                "info_developer": result[5],
+                "code": result[6],
+                "codes": result[7],
+                "coin": result[8],
+                "upload_photo": result[9],
+                "photo": result[10],
+                "video": result[11],
+                "kef": result[12],
+                "kev": result[13],
+                "all_updates": result[14],
+                "latest_update": result[15],
+                "top": result[16],
+                "roulette": result[17],
+                "hey": result[18],
+                "raids": result[19]
+            }
+
+            cursor.execute('SELECT * FROM command_cooldowns WHERE chat_id = ?', (chat_id,))
+            cooldowns_result = cursor.fetchone()
+            cooldowns = {
+                "thank_you": cooldowns_result[2],
+                "info_custom": cooldowns_result[3],
+                "info_admin": cooldowns_result[4],
+                "info_developer": cooldowns_result[5],
+                "code": cooldowns_result[6],
+                "codes": cooldowns_result[7],
+                "coin": cooldowns_result[8],
+                "upload_photo": cooldowns_result[9],
+                "photo": cooldowns_result[10],
+                "video": cooldowns_result[11],
+                "kef": cooldowns_result[12],
+                "kev": cooldowns_result[13],
+                "all_updates": cooldowns_result[14],
+                "latest_update": cooldowns_result[15],
+                "top": cooldowns_result[16],
+                "roulette": cooldowns_result[17],
+                "hey": cooldowns_result[18],
+                "raids": cooldowns_result[19]
+            }
+            
+            message_text = "Статус команд на этом сервере:\n"
+            for command, status in commands_status.items():
+                cooldown_duration = cooldowns.get(command, 5)  # Значение КД по умолчанию 5 секунд
+                status_text = "✔️" if status else "❌"
+                message_text += f"{status_text}:   /{command} (КД: {cooldown_duration} секунд)\n"
+
+            bot.reply_to(message, message_text)
+            debug_message(message, f"Показан список команд на сервере {chat_id}")
+        else:
+            bot.reply_to(message, "Не удалось получить список команд для этого чата. Сообщите: @DanlokPlay")
+            debug_message(message, "Не удалось получить список команд для этого чата.")
+    
+    print(f"Показан список команд для чата {chat_id}.")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#######################                        Личные без ограничений. В группах возможны ограничения.                        #########################
+
+@bot.message_handler(commands=['спасибо', 'thank_you'])
+def thank_you(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'thank_you'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+    
+    bot.send_message(message.chat.id, "Тебе спасибо ^_^\nСпасибо за мотивацию! :D")
+    debug_message(message, 'Спасибо от ')
+
+
+
+
+
+@bot.message_handler(commands=['info_custom', 'инфо_пользователь', 'info', 'инфо'])
+def custom_commands(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'info_custom'
+
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере!")
+            return
+        if not cool_down(message, command_name):
+            return
+
+    path_file = INFO_FOLDER + command_name + ".txt"
+
+    with open(path_file, 'r', encoding='utf-8') as file:
+        info_custom_text = file.read()
+
+    bot.send_message(message.chat.id, info_custom_text, reply_to_message_id=message.id)
+    
+    debug_message(message, 'Команды пользователей высланы')
+    print("Информация о пользовательских командах выслана!")
+
+
+
+
+
+@bot.message_handler(commands=['info_admin', 'инфо_админ', 'info_a', 'инфо_а'])
+def admin_commands(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'info_admin'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+        
+    path_file = INFO_FOLDER + command_name + ".txt"
+        
+    with open(path_file, 'r', encoding='utf-8') as file:
+        info_admin_text = file.read()
+
+    bot.send_message(message.chat.id, info_admin_text, reply_to_message_id=message.id)
+    
+    debug_message(message, 'Команды админов высланы')
+    print("Информация о админских командах выслана!")
+
+
+
+@bot.message_handler(commands=['info_developer', 'инфо_разработчик', 'info_d', 'инфо_р'])
+def developer_commands(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'info_developer'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+    
+    path_file = INFO_FOLDER + command_name + ".txt"
+    
+    with open(path_file, 'r', encoding='utf-8') as file:
+        info_developer_text = file.read()
+
+    bot.send_message(message.chat.id, info_developer_text, reply_to_message_id=message.id)
+
+    debug_message(message, 'Команды разработчика высланы')
+    print("Информация о командах разработчика выслана!")
 
 
 @bot.message_handler(commands=['код', 'к', 'пароль', 'k', 'kod', 'code', 'password'])
 def start_code(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'code'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+
+    text = 'Код на сегодня выслан'
+    codes = read_codes_from_file('codes.txt')  # Загружаем коды каждый раз при вызове команды
     current_datetime = datetime.now()
     current_month = current_datetime.month
     current_day = current_datetime.day
@@ -96,288 +580,439 @@ def start_code(message):
     if (current_year, current_month) in codes:
         day_codes = codes[(current_year, current_month)]
         if current_day in day_codes:
-            daily_code=day_codes[current_day]
-            send_message_with_retry(message.chat.id, daily_code)
+            daily_code = day_codes[current_day]
+            bot.send_message(message.chat.id, daily_code)
+        else:
+            bot.reply_to(message, "Код на сегодня не найден.")
+            text = 'Код на сегодня не найдены'
+    else:
+        bot.reply_to(message, "Коды на этот месяц не найдены.")
+        text = 'Коды на месяц не найдены'
+    debug_message(message, text)
 
-    chat_name = message.chat.title if message.chat.title else message.chat.username
-    username = message.from_user.username if message.from_user.username else message.from_user.first_name
-    notification_text = f'(!код) Код на сегодня был просмотрен @{username} в чате <a href="https://t.me/{chat_name}">{chat_name}</a>'
-    bot.send_message(1375077159, notification_text, parse_mode='HTML')
     print("Пароль на сегодня выслан!", current_day, ':', daily_code)
+
+def read_codes_from_file(filename):
+    codes = {}
+    try:
+        with open(filename, 'r') as file:
+            lines = file.readlines()
+            for line in lines:
+                try:
+                    year_month, codes_str = line.strip().split('::')
+                    year, month = map(int, year_month.split('_'))
+                    
+                    day_codes = {}
+                    for day_code in codes_str.split(','):
+                        day, code = day_code.split(':')
+                        day_codes[int(day)] = code
+                    codes[(year, month)] = day_codes
+                except ValueError:
+                    print(f"Неправильный формат данных в строке: {line.strip()}")
+    except FileNotFoundError:
+        print(f"Файл '{filename}' не найден.")
+    except Exception as e:
+        print(f"Произошла ошибка: {e}")
+    
+    return codes
+
 
 
 @bot.message_handler(commands=['коды', 'коды_на_месяц', 'месяц', 'бункер', 'бункер_альфа', 'codes'])
 def start_codes(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'codes'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+        
+    
     current_datetime = datetime.now()
     current_month = current_datetime.month
     current_year = current_datetime.year
 
-    print(current_month)
+    # Словарь для соответствия месяцев и их названий
+    month_names = {
+        1: 'Январь',
+        2: 'Февраль',
+        3: 'Март',
+        4: 'Апрель',
+        5: 'Май',
+        6: 'Июнь',
+        7: 'Июль',
+        8: 'Август',
+        9: 'Сентябрь',
+        10: 'Октябрь',
+        11: 'Ноябрь',
+        12: 'Декабрь'
+    }
 
-    if current_month == 1:
-        filename = f'Январь {current_year}.png'
-        month_name = 'Январь'
-    elif current_month == 2:
-        filename = f'Февраль {current_year}.png'
-        month_name = 'Февраль'
-    elif current_month == 3:
-        filename = f'Март {current_year}.png'
-        month_name = 'Март'
-    elif current_month == 4:
-        filename = f'Апрель {current_year}.png'
-        month_name = 'Апрель'
-    elif current_month == 5:
-        filename = f'Май {current_year}.png'
-        month_name = 'Май'
-    elif current_month == 6:
-        filename = f'Июнь {current_year}.png'
-        month_name = 'Июнь'
-    elif current_month == 7:
-        filename = f'Июль {current_year}.png'
-        month_name = 'Июль'
-    elif current_month == 8:
-        filename = f'Август {current_year}.png'
-        month_name = 'Август'
-    elif current_month == 9:
-        filename = f'Сентябрь {current_year}.png'
-        month_name = 'Сентябрь'
-    elif current_month == 10:
-        filename = f'Октябрь {current_year}.png'
-        month_name = 'Октябрь'
-    elif current_month == 11:
-        filename = f'Ноябрь {current_year}.png'
-        month_name = 'Ноябрь'
-    elif current_month == 12:
-        filename = f'Декабрь {current_year}.png'
-        month_name = 'Декабрь'
-    else:
-        filename = ''
-        month_name = ''
-    
-    if filename:
+    month_name = month_names.get(current_month)
+    if month_name:
+        filename = f'коды/{month_name} {current_year}.png'
         with open(filename, 'rb') as file:
             bot.send_photo(message.chat.id, file, f'Коды на {month_name} {current_year}')
-    
-    chat_name = message.chat.title if message.chat.title else message.chat.username
-    username = message.from_user.username if message.from_user.username else message.from_user.first_name
-    notification_text = f'(!коды) Коды на {month_name} были просмотрены @{username} в чате <a href="https://t.me/{chat_name}">{chat_name}</a>'
-    bot.send_message(1375077159, notification_text, parse_mode='HTML')
-    print("Пароли на месяцы высланы!")
+        print("Коды на месяцы высланы!")
+        debug_message(message, 'Коды на месяц высланы')
+    else:
+        print("Ошибка: Неверный номер месяца!")
+
+
 
 @bot.message_handler(commands=['м', 'монета', 'coin'])
 def start_coins(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'coin'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+    
     var = randint(0, 1)
     heads = 'Орёл'
     tails = 'Решка'
     if var == 0:
         bot.send_message(message.chat.id, f'{heads}', reply_to_message_id=message.id)
 
-        chat_name = message.chat.title if message.chat.title else message.chat.username
-        username = message.from_user.username if message.from_user.username else message.from_user.first_name
-        notification_text = f'(!монета) Монета подброшена @{username} в чате <a href="https://t.me/{chat_name}">{chat_name}</a> и выпал {heads}'
-        bot.send_message(1375077159, notification_text, parse_mode='HTML')
         print(f"Подброс монеты сработал! ({heads})")
+        debug_message(message, 'Монета подброшена (Орёл):')
+        
     else:
         bot.send_message(message.chat.id, f'{tails}', reply_to_message_id=message.id)
 
-        chat_name = message.chat.title if message.chat.title else message.chat.username
-        username = message.from_user.username if message.from_user.username else message.from_user.first_name
-        notification_text = f'(!монета) Монета подброшена @{username} в чате <a href="https://t.me/{chat_name}">{chat_name}</a> и выпала {tails}'
-        bot.send_message(1375077159, notification_text, parse_mode='HTML')
         print(f"Подброс монеты сработал! ({tails})")
+        debug_message(message, 'Монета подброшена (Решка):')
 
-# Сначала записать коды, потом с упоминанием этого сообщения выполнить команду
-@bot.message_handler(commands=['записать_коды'])
-def write_codes(message):
-    # Проверяем, что пользователь, вызвавший команду, является администратором
-    if message.from_user.id != 1375077159:
-        chat_name = message.chat.title if message.chat.title else message.chat.username
-        username = message.from_user.username if message.from_user.username else message.from_user.first_name
-        notification_text = f'@{username} попытался записать коды в чате <a href="https://t.me/{chat_name}">{chat_name}</a>'
-        bot.send_message(1375077159, notification_text, parse_mode='HTML')
-        bot.reply_to(message, "Извините, у вас нет прав на выполнение этой команды.")
-        return
 
-    # Проверяем, что в сообщении, содержащем команду, есть данные для записи
-    if not message.reply_to_message or not message.reply_to_message.text:
-        bot.reply_to(message, "Не найдено сообщение для записи в файл.")
-        return
 
-    # Получаем текст сообщения, на которое был отправлен ответ, и добавляем символ новой строки
-    codes_text = message.reply_to_message.text.strip()
-    year_month, codes = codes_text.split('\n', 1)  # Разделяем год_месяц и коды
-    codes = codes.replace('\n', ',')  # Заменяем символы новой строки на запятые
-    codes_text = '\n' + f'{year_month}::{codes}'  # Форматируем строку с кодами
+ALL_NAMES_FILE = 'all_names_of_photos.txt'
 
-    # Записываем полученные коды в файл
-    filename = 'codes.txt'
-    try:
-        with open(filename, 'a') as file:
-            file.write(codes_text + '\n')
-        bot.reply_to(message, "Коды успешно записаны в файл.")
-    except Exception as e:
-        bot.reply_to(message, f"Произошла ошибка при записи кодов в файл: {e}")
-
-    # Отправляем уведомление об успешной записи кодов
-    chat_name = message.chat.title if message.chat.title else message.chat.username
-    username = message.from_user.username if message.from_user.username else message.from_user.first_name
-    notification_text = f'Коды были записаны в файл @{username} в чате <a href="https://t.me/{chat_name}">{chat_name}</a>'
-    bot.send_message(1375077159, notification_text, parse_mode='HTML')
-    print('Коды записаны!')
-
-@bot.message_handler(commands=['загрузить_фото'])
+@bot.message_handler(commands=['загрузить_фото', 'upload_photo'])
 def upload_photo(message):
+    handle_message(message)
 
-    if message.from_user.id != 1375077159:
-        chat_name = message.chat.title if message.chat.title else message.chat.username
-        username = message.from_user.username if message.from_user.username else message.from_user.first_name
-        notification_text = f'@{username} попытался загрузить фото в чате <a href="https://t.me/{chat_name}">{chat_name}</a>'
-        bot.send_message(1375077159, notification_text, parse_mode='HTML')
-        bot.reply_to(message, "Извините, у вас нет прав на выполнение этой команды.")
-        return
-    # Check if command is issued with correct format
-    if len(message.text.split()) < 2:
-        bot.reply_to(message, "Неправильный формат команды. Пожалуйста, укажите название фото.")
-        return
-
-    # Splitting the command into parts
-    command_parts = message.text.split(maxsplit=1)[1].split()
+    chat_id = message.chat.id
+    command_name = 'upload_photo'
     
-    # Checking if the command is in the format "Месяц год"
-    if len(command_parts) == 2 and command_parts[0].capitalize() in ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']:
-        try:
-            # Получаем информацию о файле фотографии
-            photo = message.reply_to_message.photo[-1]
-            file_info = bot.get_file(photo.file_id)
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+    
+    try:
+        photo = message.reply_to_message.photo[-1]
+        file_info = bot.get_file(photo.file_id)
+        file = bot.download_file(file_info.file_path)
+        photo_name = message.text.split(maxsplit=1)[1].strip()
 
-            # Скачиваем фото
-            file = bot.download_file(file_info.file_path)
+        photo_name = capitalize_photo_name(photo_name)
 
-            # Получаем название фото и комментарий из аргументов команды
-            photo_args = message.text.split(maxsplit=1)[1].split('-', 1)  # Название фото и комментарий
-            photo_name = photo_args[0].strip()  # Название фото
-            comment = photo_args[1].strip() if len(photo_args) > 1 else ''  # Комментарий
+        if os.path.exists(os.path.join(CHECK_FOLDER, f'{photo_name}.png')):
+            bot.reply_to(message, f"Фотография с названием '{photo_name}' уже существует в папке проверки. Пожалуйста, укажите другое имя.")
+            debug_message(message, f"Фотография с названием '{photo_name}' уже существует в папке проверки:")
+            return
 
-            # Генерируем имя файла для сохранения
-            file_name = f'{photo_name}.png'
+        if check_photo_name(photo_name.lower()):
+            bot.reply_to(message, f"Фотография с названием '{photo_name}' уже существует, среди всех фото!")
+            debug_message(message, f"Фотография с названием '{photo_name}' уже существует, среди всех фото:")
+            return
 
-            # Сохраняем фото на сервере
-            with open(file_name, 'wb') as new_file:
-                new_file.write(file)
+        file_name = os.path.join(CHECK_FOLDER, f'{photo_name}.png')
 
-            # Отправляем подтверждение о загрузке
-            bot.reply_to(message, "Фотография успешно загружена.")
+        with open(file_name, 'wb') as new_file:
+            new_file.write(file)
 
-            # Отправляем уведомление об успешной загрузке фотографии
-            chat_name = message.chat.title if message.chat.title else message.chat.username
-            username = message.from_user.username if message.from_user.username else message.from_user.first_name
-            notification_text = f'Коды на "{photo_name}" были загружены @{username} в чате <a href="https://t.me/{chat_name}">{chat_name}</a>'
-            bot.send_message(1375077159, notification_text, parse_mode='HTML')
-            print('Коды на месяц загружены!')
+        user_id = message.from_user.id
+        user_name = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
 
-        except Exception as e:
-            bot.reply_to(message, f"Произошла ошибка при загрузке фотографии: {e}")
-        
-    else:
-        # Rest of the upload_photo function remains unchanged
-        try:
-            # Получаем информацию о файле фотографии
-            photo = message.reply_to_message.photo[-1]
-            file_info = bot.get_file(photo.file_id)
+        bot.reply_to(message, "Фотография успешно загружена. Ожидайте проверки.")
+        bot.send_photo(DEVELOPER_ID, file, caption=f"Новая фотография: {photo_name} (Загрузил: {user_name})", reply_markup=approve_keyboard(photo_name, user_id))
+        debug_message(message, f"Новая фотография: {photo_name} (Загрузил: {user_name})")
 
-            # Скачиваем фото
-            file = bot.download_file(file_info.file_path)
+    except Exception as e:
+        bot.reply_to(message, f"Произошла ошибка при загрузке фотографии: {e}. Пожалуйста, попробуйте загрузить фото ещё раз.")
 
-            # Получаем название фото и комментарий из аргументов команды
-            photo_args = message.text.split(maxsplit=1)[1].split('-', 1)  # Название фото и комментарий
-            photo_name = photo_args[0].strip()  # Название фото
-            comment = photo_args[1].strip() if len(photo_args) > 1 else ''  # Комментарий
+@bot.callback_query_handler(func=lambda call: call.data.startswith('approve_photo'))
+def approve_photo(call):
+    photo_name = call.data.split('_')[2]
+    user_id = int(call.data.split('_')[3])
+    message = call.message
 
-            # Генерируем имя файла для сохранения
-            file_name = f'{photo_name}.png'
-            file_name = file_name.capitalize()
+    chat_id = message.chat.id
+    message_id = message.message_id
 
-            # Сохраняем фото на сервере
-            with open(file_name, 'wb') as new_file:
-                new_file.write(file)
+    try:
+        if message.reply_markup:
+            if call.data.endswith('yes'):
+                bot.send_message(message.chat.id, f"Укажите путь, куда переместить фотографию.")
+                bot.register_next_step_handler(message, move_photo, photo_name, user_id, chat_id, message_id)
+            else:
+                os.remove(os.path.join(CHECK_FOLDER, f'{photo_name}.png'))
+                bot.send_message(user_id, f"Фотография {photo_name} не одобрена и удалена.")
+                bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
+        else:
+            bot.send_message(message.chat.id, "Сообщение уже изменено.")
+    except OSError as e:
+        bot.send_message(message.chat.id, f"Произошла ошибка: {e}")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Произошла неожиданная ошибка: {e}")
 
-            # Добавляем название фото и комментарий в текстовый файл
-            with open('uploaded_photos.txt', 'a', encoding='utf-8') as txt_file:
-                txt_file.write(f"/ф {photo_name} - {comment}\n")
+def move_photo(message, photo_name, user_id, chat_id, message_id):
+    try:
+        destination_path = message.text.strip()
+        if not os.path.exists(destination_path):
+            bot.send_message(message.chat.id, f"Указанный путь '{destination_path}' не существует. Хотите его создать? (да/нет)")
+            bot.register_next_step_handler(message, confirm_create_directory, photo_name, user_id, chat_id, message_id, destination_path)
+            return
 
-            # Отправляем подтверждение о загрузке
-            bot.reply_to(message, "Фотография успешно загружена.")
+        if os.path.abspath(destination_path) == os.path.abspath(CHECK_FOLDER):
+            bot.send_message(message.chat.id, "Нельзя перемещать в эту папку.")
+            debug_message(message, f"Нельзя перемещать в эту папку check/:")
+            return
 
-            # Отправляем уведомление об успешной загрузке фотографии
-            chat_name = message.chat.title if message.chat.title else message.chat.username
-            username = message.from_user.username if message.from_user.username else message.from_user.first_name
-            notification_text = f'Фотография "{photo_name}" была загружена @{username} в чате <a href="https://t.me/{chat_name}">{chat_name}</a>'
-            bot.send_message(1375077159, notification_text, parse_mode='HTML')
-            print('Фотография загружена!')
-        except Exception as e:
-            bot.reply_to(message, f"Произошла ошибка при загрузке фотографии: {e}")
+        move_photo_to_destination(photo_name, user_id, chat_id, message_id, destination_path)
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Произошла ошибка: {e}")
+
+def confirm_create_directory(message, photo_name, user_id, chat_id, message_id, destination_path):
+    try:
+        if message.text.strip().lower() in ['да', 'yes']:
+            os.makedirs(destination_path)
+            bot.send_message(message.chat.id, f"Путь '{destination_path}' создан.")
+            move_photo_to_destination(photo_name, user_id, chat_id, message_id, destination_path)
+        else:
+            bot.send_message(message.chat.id, "Перемещение отменено.")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Произошла ошибка при создании директории: {e}")
+
+def move_photo_to_destination(photo_name, user_id, chat_id, message_id, destination_path):
+    try:
+        source = os.path.join(CHECK_FOLDER, f'{photo_name}.png')
+        destination = os.path.join(destination_path, f'{photo_name}.png')
+
+        if os.path.exists(destination):
+            bot.send_message(chat_id, f"Файл с названием '{photo_name}' уже существует в целевой папке. Укажите другой путь.")
+            debug_message(chat_id, f"Файл с названием '{photo_name}' уже существует в целевой папке:")
+            return
+
+        os.rename(source, destination)
+        bot.send_message(chat_id, f"Фотография {photo_name} перемещена по указанному пути.")
+
+        bot.send_message(user_id, f"Фотография {photo_name} одобрена!")
+        increase_survival_points(user_id)
+
+        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
+
+        write_new_name(photo_name)
+
+        bot.send_message(DEVELOPER_ID, 'Изменить файл с путями: /rewrite')
+    except Exception as e:
+        bot.send_message(chat_id, f"Произошла ошибка при перемещении фотографии: {e}")
+
+def read_file_content(file_path):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            content = file.read()
+        return content
+    except FileNotFoundError:
+        return None
+
+def rewrite_file(file_path, new_content):
+    with open(file_path, 'w', encoding='utf-8') as file:
+        file.write(new_content)
+
+def capitalize_photo_name(photo_name):
+    return photo_name.capitalize()
+
+def increase_survival_points(user_id):
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET survival_points = survival_points + 1 WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+def approve_keyboard(photo_name, user_id):
+    keyboard = types.InlineKeyboardMarkup()
+    approve_button = types.InlineKeyboardButton(text="Одобрить", callback_data=f"approve_photo_{photo_name}_{user_id}_yes")
+    reject_button = types.InlineKeyboardButton(text="Отклонить", callback_data=f"approve_photo_{photo_name}_{user_id}_no")
+    keyboard.row(approve_button, reject_button)
+    return keyboard
+
+def read_all_names():
+    with open(ALL_NAMES_FILE, 'r', encoding='utf-8') as file:
+        names = set(line.strip().lower() for line in file)
+        return names
+
+def write_new_name(photo_name):
+    capitalized_name = capitalize_photo_name(photo_name)
+    with open(ALL_NAMES_FILE, 'a', encoding='utf-8') as file:
+        file.write(capitalized_name + '\n')
+
+def check_photo_name(photo_name):
+    all_names = read_all_names()
+    result = photo_name.lower() in all_names
+    print(f"Проверка наличия фотографии {photo_name.lower()} в файле: {result}")
+    return photo_name.lower() in all_names
+
 
 
 @bot.message_handler(commands=['фото', 'ф', 'photo', 'ph'])
-def send_photo_by_name(message):
-    # Проверяем, что команда содержит аргументы
+def choice (message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'photo'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+    
+    send_photo_by_name_pc(message)
+
+def find_photo_in_folders(photo_name, folder):
+    found_files = []
+
+    # Игнорируем папку "check"
+    if folder.endswith("check"):
+        return found_files
+
+    # Ищем файлы с заданным именем в текущей папке
+    search_pattern = os.path.join(folder, f"*{photo_name}.png")
+    found_files += glob.glob(search_pattern)
+
+    # Перебираем подпапки и ищем в них
+    subfolders = [f.path for f in os.scandir(folder) if f.is_dir()]
+    for subfolder in subfolders:
+        found_files += find_photo_in_folders(photo_name, subfolder)
+
+    return found_files
+
+
+def send_photo_by_name_pc(message):
     if len(message.text.split()) < 2:
-        bot.reply_to(message, "Вы не указали название фото. Пожалуйста, попробуйте снова.")
+        bot.reply_to(message, "Вы не указали название фото.\n Примеры: /ф глок, /ф доставки")
+        debug_message(message, f"Не указано название фото:")
         return
 
     try:
-        # Получаем название фото из аргументов команды
         photo_name = message.text.split(maxsplit=1)[1].capitalize()  # Название фото
         
-        Temp = photo_name + ".png"
+        # Создаем список папок, в которых нужно искать фотографии
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        folders = [folder for folder in os.listdir(current_dir) if os.path.isdir(os.path.join(current_dir, folder))]
 
-        # Приводим название фото и строки из файла к нижнему регистру для сравнения
-        photo_name_lower = photo_name.lower()
+        found_files = []  # инициализируем переменную found_files здесь
 
-        # Выбор файла в зависимости от наличия слова "моды" в команде
-        file_to_read = 'uploaded_photos.txt'
-        if 'моды' in message.text.lower():
-            file_to_read = 'weapons.txt'
-            if 'моды на' in message.text.lower():
-                photo_name = 'Моды ' + photo_name.split('Моды на ')[1]
-                photo_name_lower = photo_name.lower()
+        # Перебираем папки и ищем файлы в них
+        for folder in folders:
+            found_files += find_photo_in_folders(photo_name, folder)
 
-        # Читаем строки из файла и ищем совпадение с photo_name
-        with open(file_to_read, 'r', encoding='utf-8') as text_file:
-            for line in text_file:
-                if photo_name_lower in line.lower():
-                    found_line = line.strip()
-                    break
-            else:
-                raise FileNotFoundError
+        if not found_files:
+            raise FileNotFoundError
 
         # Отправляем фото пользователю
-        file_name = f'{photo_name}.png'  # Имя файла
-        with open(file_name, 'rb') as photo_file:
-            bot.send_photo(message.chat.id, photo_file, f"{found_line}")
+        for found_file in found_files:
+            with open(found_file, 'rb') as photo_file:
+                bot.send_photo(message.chat.id, photo_file, f'{photo_name}')
 
         # Отправляем уведомление
-        chat_name = message.chat.title if message.chat.title else message.chat.username
-        username = message.from_user.username if message.from_user.username else message.from_user.first_name
-        notification_text = f'@{username} просмотрел фото "{file_name}" в чате <a href="https://t.me/{chat_name}">{chat_name}</a>'
-        bot.send_message(1375077159, notification_text, parse_mode='HTML')
         print('Фото отослано!')
+        debug_message(message, f'Фото {photo_name} было просмотрено')
 
     except FileNotFoundError:
-        bot.reply_to(message, f"Фотография с названием '{photo_name}' не найдена. Для просмотра доступных фото напиши команду /кеф")
-        chat_name = message.chat.title if message.chat.title else message.chat.username
-        username = message.from_user.username if message.from_user.username else message.from_user.first_name
-        notification_text = f'@{username} Хотел просмотреть фото "{Temp}" в чате <a href="https://t.me/{chat_name}">{chat_name}</a>, но её не оказалось!'
-        bot.send_message(1375077159, notification_text, parse_mode='HTML')
+        bot.reply_to(message, f"Фотография с названием '{photo_name}' не найдена.\nДля просмотра доступных фото напишите команду /кеф\n Примеры: /ф глок, /ф доставки")
+        debug_message(message, f'Нет фотографии с названием {photo_name}')
     except Exception as e:
         bot.reply_to(message, f"Произошла ошибка: {e}")
 
 
-@bot.message_handler(commands=['КЕФ', 'пр_фото', 'пример_фото', 'пр_ф', 'пф', 'кеф', 'kef'])
-def list_uploaded_photos(message):
+
+@bot.message_handler(commands=['видео', 'video', 'в', 'v'])
+def handle_videos_command(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'video'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+    
+    try:
+        videos_name = message.text.split(maxsplit=1)[1].strip()
+        videos_link = get_videos_link(videos_name)
+        
+        if videos_link:
+            bot.reply_to(message, f"{videos_link}")
+            debug_message(message, f"Видео '{videos_name}' НАЙДЕНО:")
+        else:
+            bot.reply_to(message, f"Видео с названием '{videos_name}' не найдено. Просмотр всех названий видео: /кев или /kev")
+            debug_message(message, f"Видео с названием '{videos_name}' НЕ найдено:")
+    
+    except IndexError:
+        bot.reply_to(message, "Пожалуйста, укажите название видео после команды /видео.")
+        debug_message(message, f"Пожалуйста, укажите название видео после команды /видео:")
+    except Exception as e:
+        bot.reply_to(message, f"Произошла ошибка: {e}")
+        debug_message(message, f"Произошла ошибка: {e}")
+
+# Функция для поиска ссылки по названию видео
+def get_videos_link(videos_name):
+    try:
+        with open('videos.txt', 'r', encoding='utf-8') as file:
+            lines_read = 0
+            for line in file:
+                if lines_read < 2:
+                    lines_read += 1
+                    continue  # Пропускаем первые две строки
+                # Обрезаем первые два символа строки
+                stripped_line = line.strip()[2:]
+                if ' : ' in stripped_line:
+                    name, link = stripped_line.split(' : ', 1)
+                    if name.lower() == videos_name.lower():
+                        return link
+        return None
+    except FileNotFoundError:
+        return None
+
+
+
+@bot.message_handler(commands=['пр_фото', 'пример_фото', 'пр_ф', 'пф', 'кеф', 'kef'])
+def list_photos_commads(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'kef'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+        
     try:
         # Читаем содержимое файла с названиями фотографий
-        with open('uploaded_photos.txt', 'r', encoding='utf-8') as txt_file:
+        with open('photos.txt', 'r', encoding='utf-8') as txt_file:
             photo_names = txt_file.readlines()
 
         # Проверяем, есть ли хотя бы одно название фотографии
@@ -389,46 +1024,595 @@ def list_uploaded_photos(message):
         else:
             bot.reply_to(message, "Нет загруженных фотографий.")
 
-        chat_name = message.chat.title if message.chat.title else message.chat.username
-        username = message.from_user.username if message.from_user.username else message.from_user.first_name
-        notification_text = f'@{username} просмотрел список фотографий в чате <a href="https://t.me/{chat_name}">{chat_name}</a>'
-        bot.send_message(1375077159, notification_text, parse_mode='HTML')
         print('Список названий фотографий отослан!')
+        debug_message(message, 'Просмотрен список фотографий')
 
     except FileNotFoundError:
         bot.reply_to(message, "Файл с названиями фотографий не найден.")
+        debug_message(message, 'Файл с названиями фотографий не найден')
     except Exception as e:
         bot.reply_to(message, f"Произошла ошибка при отправке названий фотографий: {e}")
-        
-        
-@bot.message_handler(commands=['обновления', 'updates'])
-def show_updates(message):
+        debug_message(message, f"Произошла ошибка при отправке названий фотографий: {e}")
+
+
+
+@bot.message_handler(commands=['кев', 'kev'])
+def handle_all_videos_command(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'kev'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+    
     try:
-        with open('updates.txt', 'r', encoding='utf-8') as updates_file:
-            updates_text = updates_file.read()
-            bot.reply_to(message, updates_text)
-            
-        chat_name = message.chat.title if message.chat.title else message.chat.username
-        username = message.from_user.username if message.from_user.username else message.from_user.first_name
-        notification_text = f'@{username} просмотрел обновления бота в чате <a href="https://t.me/{chat_name}">{chat_name}</a>'
-        bot.send_message(1375077159, notification_text, parse_mode='HTML')
-        print('Обновления Бота отосланы!')
+        videos_names = get_all_videos_names()
+        
+        if videos_names:
+            names_list = "\n".join(videos_names)
+            bot.reply_to(message, f"Список всех видео:\n{names_list}")
+            debug_message(message, f"Список всех видео отправлен:")
+        else:
+            bot.reply_to(message, "Файл с видео не найден или пуст.")
+            debug_message(message, f"Файл с видео не найден или пуст:")
+    
+    except Exception as e:
+        bot.reply_to(message, f"Произошла ошибка: {e}")
+        debug_message(message, f"Произошла ошибка при отправке файла с названиями видео: {e}")
+
+# Функция для чтения всех названий видео из файла
+def get_all_videos_names():
+    try:
+        with open('videos.txt', 'r', encoding='utf-8') as file:
+            names = [line.strip().split(' : ')[0] for line in file]
+        return names
     except FileNotFoundError:
-        bot.reply_to(message, "Файл обновлений не найден.")
+        return None
+
+
+
+
+
+@bot.message_handler(commands=['все_обновления', 'all_updates'])
+def all_updates(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'all_updates'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+        
+    path_file = INFO_FOLDER + command_name + ".txt"
+    
+    with open(path_file, 'rb') as updates_file:
+        bot.send_document(chat_id, updates_file)
+            
+    debug_message(message, 'Просмотрены ВСЕ обновления')
+    print('Обновления Бота отосланы!')
+
+
+
+
+
+@bot.message_handler(commands=['последнее_обновление', 'latest_update'])
+def latest_updates(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'latest_update'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+        
+    path_file = INFO_FOLDER + command_name + ".txt"
+    path_photo = INFO_FOLDER + command_name + ".png"
+    
+    with open(path_file, 'r', encoding='utf-8') as updates_file:
+        updates_text = updates_file.read()
+    
+    with open(path_photo, 'rb') as photo_file:
+        bot.send_photo(chat_id, photo_file, caption=updates_text)
+            
+    debug_message(message, 'Просмотрено последнее обновление')
+    print('Последнее обновление Бота отослано!')
+
+
+
+
+@bot.message_handler(commands=['топ', 'top'])
+def top_users(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'top'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+    
+    try:
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+
+        # Выбираем всех пользователей, у которых количество очков больше 0
+        cursor.execute("SELECT id, username, name, surname, survival_points FROM users WHERE survival_points > 0")
+
+        # Получаем результаты запроса
+        users = cursor.fetchall()
+
+        # Сортируем пользователей по количеству очков в убывающем порядке
+        sorted_users = sorted(users, key=lambda x: x[4], reverse=True)
+
+        # Формируем сообщение с топом пользователей
+        top_message = "🏆 Топ пользователей, которые заполнили бота информацией🏆\n\n"
+        for index, user in enumerate(sorted_users, start=1):
+            user_info = f"{index}. "
+            if user[1]:  # Если у пользователя есть username
+                user_info += f"@{user[1]}"
+            else:  # Иначе выводим имя и фамилию
+                user_info += f"{user[2]} {user[3]}"
+            user_info += f" - {user[4]} очков\n"
+            top_message += user_info
+
+        # Отправляем сообщение с топом пользователей
+        bot.reply_to(message, top_message)
+        debug_message(message, f"Топ пользователей отосланы по загрузке фото:")
+
+        conn.close()
+
+    except Exception as e:
+        bot.reply_to(message, f"Произошла ошибка: {e}")
+        debug_message(message, f"Произошла ошибка: {e}")
+
+
+
+# Список с тремя различными смайликами
+smileys = ["💩", "🎁", "☣️"]
+
+@bot.message_handler(commands=['рулетка', 'roulette', 'r', 'р'])
+def roulette(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'roulette'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+    
+    # Генерируем три случайных смайлика с повторениями
+    random_smileys = [random.choice(smileys) for _ in range(3)]
+    
+    # Формируем строку из трех случайно выбранных смайликов
+    result = " ".join(random_smileys)
+    
+    # Отправляем смайлики в чат
+    bot.send_message(message.chat.id, result, reply_to_message_id=message.id)
+
+    print('Рулетка сработала!')
+    debug_message(message, f'Рулетка сработала!({result})')
+
+
+# Функция для чтения случайной строки из файла
+def get_random_phrase():
+    with open('phrases.txt', 'r', encoding='utf-8') as file:
+        phrases = file.readlines()
+    return random.choice(phrases).strip()
+
+@bot.message_handler(commands=['эй', 'hey'])
+def send_random_phrase(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'hey'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+    
+    phrase = get_random_phrase()
+    bot.send_message(message.chat.id, phrase)
+
+    print('Запрошена случайная фраза') 
+    debug_message(message, f'Запрошена случайная фраза')
+
+
+
+@bot.message_handler(commands=['рейды', 'raids'])
+def send_apk(message):
+    handle_message(message)
+
+    chat_id = message.chat.id
+    command_name = 'raids' 
+    apk_name = 'Базы_LDoE_1.4_Repack_by_DanlokPlay'
+    
+    if message.chat.type != 'private':
+        if not check_access(chat_id, command_name):
+            bot.reply_to(message, "Эта команда отключена на этом сервере.")
+            return
+        if not cool_down(message, command_name):
+            return
+        
+    path_file = os.path.join(APK_FOLDER, apk_name + ".apk")
+    
+    try:
+        with open(path_file, 'rb') as apk_file:
+            bot.send_document(chat_id, apk_file, caption="Приложение с Базами LDoE (с Android 4.1, armeabi-v7a)\nВерсия 1.4\n- Убрана реклама!\n- Обновлена иконка, задний фон, начальный экран у приложения\n- Обновлены текстуры предметов\n- Уменьшен вес приложения\n- Изменено имя пакета\n- Есть подпись приложения")
+            
+        debug_message(message, 'Отправлен APK файл')
+        print('APK файл отправлен')
+    except Exception as e:
+        print(f"Ошибка при отправке файла: {e}")
+    finally:
+        del apk_file  # Удаление ссылки на объект файла
+        gc.collect()  # Принудительный вызов сборщика мусора
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+####################                   АДМИНЫ (В группах) + создатель                       ###########################
+
+
+@bot.message_handler(commands=['изменить_кд', 'change_cd', 'change_cooldown'])
+def change_cooldown(message):
+    handle_message(message)
+    
+    if message.chat.type not in ('group', 'supergroup'):
+        bot.reply_to(message, "Команда /изменить_кд может использоваться только в групповых чатах!")
+        debug_message(message, "Команда /изменить_кд может использоваться только в групповых чатах")
+        return
+    
+    chat_id = message.chat.id
+    
+    user_id = message.from_user.id
+    if user_id != DEVELOPER_ID and not is_chat_admin(bot, chat_id, user_id):
+        bot.reply_to(message, "У вас недостаточно прав для выполнения этой команды")
+        debug_message(message, "Попытка изменить КД у чата без достаточных прав")
+        return
+    
+    try:
+        command, new_cooldown = message.text.split()[1:3]
+        new_cooldown = int(new_cooldown)
+    except (IndexError, ValueError):
+        bot.reply_to(message, "Используйте команду в формате: /изменить_кд <команда> <сек>")
+        debug_message(message, "Используйте команду в формате: /изменить_кд <команда> <сек>")
+        return
+    
+    if not (0 <= new_cooldown <= 1_000_000):
+        bot.reply_to(message, "Новое значение КД должно быть целым числом от 0 до 1 000 000 секунд")
+        debug_message(message, "Новое значение КД должно быть целым числом от 0 до 1 000 000 секунд")
+        return
+
+    command_column = f'cd_{command}'
+    
+    with sqlite3.connect('chat_servers.db') as conn:
+        cursor = conn.cursor()
+        
+        cursor.execute("PRAGMA table_info(command_cooldowns)")
+        columns = [description[1] for description in cursor.fetchall()]
+        if command_column not in columns:
+            bot.reply_to(message, f"Команда '{command}' не найдена!")
+            debug_message(message, f"Команда '{command}' не найдена")
+            return
+        
+        cursor.execute(f'''
+            UPDATE command_cooldowns
+            SET {command_column} = ?
+            WHERE chat_id = ?
+        ''', (new_cooldown, chat_id))
+        conn.commit()
+
+        if cursor.rowcount > 0:
+            bot.reply_to(message, f"Значение КД для команды '{command}' успешно изменено на {new_cooldown} секунд")
+            debug_message(message, f"Значение КД для команды '{command}' успешно изменено на {new_cooldown} секунд")
+        else:
+            bot.reply_to(message, "Ошибка при изменении значения КД")
+            debug_message(message, "Ошибка при изменении значения КД")
+
+
+
+@bot.message_handler(commands=['изменить_доступ', 'change_access'])
+def change_access(message):
+    handle_message(message)
+    
+    if message.chat.type not in ('group', 'supergroup'):
+        bot.reply_to(message, "Команда /изменить_доступ может использоваться только в групповых чатах!")
+        debug_message(message, "Команда /изменить_доступ может использоваться только в групповых чатах!")
+        return
+    
+    chat_id = message.chat.id
+    
+    user_id = message.from_user.id
+    if user_id != DEVELOPER_ID and not is_chat_admin(bot, chat_id, user_id):
+        bot.reply_to(message, "У вас недостаточно прав для выполнения этой команды!")
+        debug_message(message, "Попытка изменить доступ к команде в чате без достаточных прав!")
+        return
+    
+    try:
+        command_name, access_value = message.text.split()[1:3]
+        access_value = int(access_value)
+        if access_value not in (0, 1):
+            raise ValueError("Значение должно быть 0 или 1")
+    except (ValueError, IndexError):
+        bot.reply_to(message, "Используйте команду в формате: /изменить_доступ <команда> <0 или 1>")
+        debug_message(message, "Используйте команду в формате: /изменить_доступ <команда> <0 или 1>")
+        return
+
+    with sqlite3.connect('chat_servers.db') as conn:
+        cursor = conn.cursor()
+        
+        cursor.execute("PRAGMA table_info(access_to_commands)")
+        columns = [description[1] for description in cursor.fetchall()]
+        if command_name not in columns:
+            bot.reply_to(message, f"Команда '{command_name}' не найдена")
+            debug_message(message, f"Команда '{command_name}' не найдена")
+            return
+        
+        cursor.execute(f'UPDATE access_to_commands SET {command_name} = ? WHERE chat_id = ?', (access_value, chat_id))
+        conn.commit()
+        
+        bot.reply_to(message, f"Доступ к команде '{command_name}' был успешно {'включен' if access_value == 1 else 'отключен'}")
+        debug_message(message, f"Доступ к команде '{command_name}' был успешно {'включен' if access_value == 1 else 'отключен'}")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##################                Только РАЗРАБОТЧИКА                #####################
+
+# Сначала записать коды, потом с упоминанием этого сообщения выполнить команду
+@bot.message_handler(commands=['записать_коды'])
+def write_codes(message):
+    handle_message(message)
+    # Проверяем, что пользователь, вызвавший команду, является администратором
+    if message.from_user.id != DEVELOPER_ID:
+        bot.reply_to(message, "Извините, у вас нет прав на выполнение этой команды.")
+        debug_message(message, 'Попытался записать коды:')
+        return
+
+    # Проверяем, что в сообщении, содержащем команду, есть данные для записи
+    if not message.reply_to_message or not message.reply_to_message.text:
+        bot.reply_to(message, "Не найдено сообщение для записи в файл.")
+        debug_message(message, 'Не найдено сообщение для записи в файл кодов: ')
+        return
+
+    # Получаем текст сообщения, на которое был отправлен ответ, и добавляем символ новой строки
+    try:
+        codes_text = message.reply_to_message.text.strip()
+        year_month, codes = codes_text.split('\n', 1)  # Разделяем год_месяц и коды
+        codes = codes.replace('\n', ',')  # Заменяем символы новой строки на запятые
+        codes_text = '\n' + f'{year_month}::{codes}'  # Форматируем строку с кодами
+
+        # Записываем полученные коды в файл
+        filename = 'codes.txt'
+        with open(filename, 'a') as file:
+            file.write(codes_text)
+        bot.reply_to(message, "Коды успешно записаны в файл.")
+    except Exception as e:
+        bot.reply_to(message, f"Произошла ошибка при записи кодов в файл: {e}")
+
+    print('Коды записаны!')
+    debug_message(message, 'Коды были записаны в файл:')
+
+
+
+
+@bot.message_handler(commands=['перезаписать', 'rewrite'])
+def handle_rewrite_command(message):
+    handle_message(message)
+    try:
+        if message.from_user.id != DEVELOPER_ID:
+            bot.reply_to(message, "У вас нет прав для использования этой команды.")
+            debug_message(message, f"Попытался использовать команду /перезаписать")
+            return
+
+        keyboard = types.InlineKeyboardMarkup()
+        rewrite_photos_button = types.InlineKeyboardButton(text="Перезаписать photos.txt", callback_data="rewrite_photos")
+        rewrite_videos_button = types.InlineKeyboardButton(text="Перезаписать videos.txt", callback_data="rewrite_videos")
+        keyboard.add(rewrite_photos_button, rewrite_videos_button)
+        
+        bot.send_message(message.chat.id, "Выберите файл для перезаписи:", reply_markup=keyboard)
     except Exception as e:
         bot.reply_to(message, f"Произошла ошибка: {e}")
 
-@bot.message_handler(commands=['echo'])
-def echo_message(message):
-    if message.from_user.id != 1375077159:
-        var = randint(0, 2)
-        if var == 0:
-        	bot.reply_to(message, "У тебя нет прав. И денег тоже:D")
-        if var == 1:
-            bot.reply_to(message, "Бесправный получается...")
-        if var == 2:
-            bot.reply_to(message, "Не-а")
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rewrite_'))
+def handle_rewrite_callback(call):
+    try:
+        if call.from_user.id != DEVELOPER_ID:
+            bot.answer_callback_query(call.id, "У вас нет прав для использования этой команды.")
+            debug_message(call.message, f"Попытался использовать команду /перезаписать")
+            return
+
+        if call.data == 'rewrite_photos':
+            file_path = 'photos.txt'
+        elif call.data == 'rewrite_videos':
+            file_path = 'videos.txt'
+        else:
+            bot.answer_callback_query(call.id, "Неверный выбор.")
+            debug_message(call.message, f"Неверный выбор файла для его перезаписи")
+            return
+
+        current_content = read_file_content(file_path)
+
+        if current_content is None:
+            bot.send_message(call.message.chat.id, f"Файл {file_path} не найден.")
+            debug_message(call.message, f"Файла для перезаписи содержимого не найден")
+            return
+
+        # Отправка текущего содержимого файла пользователю
+        bot.send_message(call.message.chat.id, f"Текущее содержимое {file_path}:\n\n{current_content}")
+        
+        # Запрос нового содержимого у пользователя
+        bot.send_message(call.message.chat.id, f"Отправьте новое содержимое для файла {file_path}.")
+        bot.register_next_step_handler(call.message, process_new_content, file_path)
+    
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"Произошла ошибка: {e}")
+
+def process_new_content(message, file_path):
+    try:
+        new_content = message.text.strip()
+        
+        # Перезапись файла с новым содержимым
+        rewrite_file(file_path, new_content)
+        
+        bot.reply_to(message, f"Файл {file_path} успешно перезаписан.")
+
+        debug_message(message, f"Файл {file_path} успешно перезаписан")
+    
+    except Exception as e:
+        bot.reply_to(message, f"Произошла ошибка при перезаписи файла: {e}")
+
+
+
+
+def save_log_interval(interval):
+    with open(LOG_INTERVAL, 'w', encoding='utf-8') as f:
+        f.write(str(interval))
+
+
+def send_logs():
+    try:
+        if os.path.exists(TEMP_LOG_FILE):
+            if os.path.getsize(TEMP_LOG_FILE) > 0:
+                with open(TEMP_LOG_FILE, 'rb') as temp_file:
+                    bot.send_document(DEVELOPER_ID, temp_file)
+                # Очищаем файл после отправки
+                with open(TEMP_LOG_FILE, 'w', encoding='utf-8') as temp_file:
+                    temp_file.write('')
+            else:
+                bot.send_message(DEVELOPER_ID, 'Бот работает! Файл temp_logs ПУСТОЙ!')
+        else:
+            bot.send_message(DEVELOPER_ID, 'Бот работает! Файла temp_logs НЕТ!')
+    except Exception as e:
+        bot.send_message(DEVELOPER_ID, f'Ошибка при отправке логов: {str(e)}')
+
+def set_log_interval(interval_minutes):
+    global current_log_interval
+    current_log_interval = interval_minutes
+    save_log_interval(interval_minutes)
+    schedule.clear()  # Очистить все запланированные задачи
+    schedule.every(interval_minutes).minutes.do(send_logs)
+
+
+
+@bot.message_handler(commands=['установить_время_лога', 'set_time_log'])
+def set_interval(message):
+    handle_message(message)
+    try:
+        if message.from_user.id != DEVELOPER_ID:
+            bot.reply_to(message, "Извините, у вас нет прав на выполнение этой команды.")
+            debug_message(message, 'Попытался изменить КД у log:')
+            return
+        interval = int(message.text.split()[1])
+        if 1 <= interval <= 1440:  # Проверяем, что интервал в минутах от 1 минуты до 1 дня (1440 минут)
+            set_log_interval(interval)
+            bot.send_message(message.chat.id, f'Интервал логирования установлен на {interval} минут.')
+            debug_message(message, f'Интервал логирования изменен на {interval} минут')
+        else:
+            bot.send_message(message.chat.id, 'Интервал должен быть от 1 минуты до 1 дня (1440 минут).')
+    except (IndexError, ValueError):
+        bot.send_message(message.chat.id, 'Пожалуйста, укажите интервал в минутах. Пример: /установить_время_лога 60')
+
+
+
+
+
+def load_log_interval():
+    if os.path.exists(LOG_INTERVAL):
+        with open(LOG_INTERVAL, 'r', encoding='utf-8') as f:
+            return int(f.read().strip())
+    return 60  # По умолчанию 60 минут
+
+
+@bot.message_handler(commands=['кд_лог', 'cd_log'])
+def get_interval(message):
+    handle_message(message)
+    if message.from_user.id != DEVELOPER_ID:
+        bot.reply_to(message, "Извините, у вас нет прав на выполнение этой команды.")
+        debug_message(message, 'Попытался просмотреть КД у log:')
         return
-    bot.send_message(-1001856142075, message.text.split('/echo', 1)[1].strip())
-      
-bot.infinity_polling()
+    bot.send_message(message.chat.id, f'Текущий интервал логирования: {current_log_interval} минут.')
+
+# Загрузка интервала логирования при старте
+current_log_interval = load_log_interval()
+set_log_interval(current_log_interval)
+
+# Запуск планировщика в отдельном потоке
+def run_scheduler():
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+scheduler_thread.start()
+   
+
+
+
+# Отправка логов при запуске бота
+send_logs()
+
+# Запуск бота
+bot.infinity_polling(none_stop=True)
