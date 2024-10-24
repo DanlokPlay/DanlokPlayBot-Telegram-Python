@@ -94,15 +94,25 @@ def cool_down(message, command):
     return True
 
 
+def get_current_time_in_timezone():
+    now = datetime.now(TIMEZONE)
+    return now.strftime("%Y-%m-%d %H:%M:%S")
+
+# Пример использования
+current_time = get_current_time_in_timezone()
+print(f"Текущее время: {current_time}")
 
 def debug_message(message, additional_text):
     chat_name = message.chat.title if message.chat.title else message.chat.username
     username = message.from_user.username if message.from_user.username else message.from_user.first_name
     notification_text = f'{additional_text} @{username} в чате <a href="https://t.me/{chat_name}">{chat_name}</a>'
+    
+    # Получаем текущее время по МСК
+    current_time_msk = get_current_time_in_timezone()
+
     # Отправка сообщения разработчику
     if additional_text == 'Спасибо от ':
         bot.send_message(DEVELOPER_ID, f'Спасибо от @{username}')
-
 
     # Запись в лог-файл
     log_entry = f'{current_time_msk} - {notification_text}\n'  # Используем текущее время по МСК
