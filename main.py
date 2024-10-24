@@ -1,12 +1,11 @@
-from config import API_TOKEN, DEVELOPER_ID, LOG_FILE, TEMP_LOG_FILE, LOG_INTERVAL, CHECK_FOLDER, INFO_FOLDER, APK_FOLDER
-from datetime import datetime
+from config import API_TOKEN, DEVELOPER_ID, LOG_FILE, TEMP_LOG_FILE, LOG_TIMES_FILE, CHECK_FOLDER, INFO_FOLDER
+from datetime import datetime, timedelta
 import time
 from random import randint
 import random
 
-
+import re
 import os
-import gc
 import glob
 
 import telebot
@@ -16,17 +15,24 @@ import threading
 import schedule
 
 
-
 token = API_TOKEN
 bot = telebot.TeleBot(token)
 
 
-
+import pytz
+TIMEZONE = pytz.timezone('Europe/Moscow')
 
 
 print('OK')
 
+# Пример функции, которая выводит текущее время в нужной таймзоне
+def get_current_time_in_timezone():
+    now = datetime.now(TIMEZONE)
+    return now.strftime("%Y-%m-%d %H:%M:%S")
 
+# Пример использования
+current_time = get_current_time_in_timezone()
+print(f"Текущее время: {current_time}")
 
 
 
@@ -99,7 +105,7 @@ def debug_message(message, additional_text):
 
 
     # Запись в лог-файл
-    log_entry = f'{datetime.now()} - {notification_text}\n'
+    log_entry = f'{current_time_msk} - {notification_text}\n'  # Используем текущее время по МСК
     with open(LOG_FILE, 'a', encoding='utf-8') as log_file:
         log_file.write(log_entry)
     with open(TEMP_LOG_FILE, 'a', encoding='utf-8') as temp_log_file:
@@ -283,12 +289,6 @@ def handle_message(message):
             conn.commit()
             print(f"Добавлен новый пользователь: {user_id}")
             debug_message(message, f"Добавлен новый пользователь: {user_id}")
-
-
-
-
-
-
 
 
 
@@ -581,7 +581,7 @@ def start_code(message):
         day_codes = codes[(current_year, current_month)]
         if current_day in day_codes:
             daily_code = day_codes[current_day]
-            bot.send_message(message.chat.id, daily_code)
+            bot.send_message(message.chat.id, f"Текущий код:\n{daily_code}\nКоды на месяц: /codes")
         else:
             bot.reply_to(message, "Код на сегодня не найден.")
             text = 'Код на сегодня не найдены'
@@ -696,7 +696,7 @@ def start_coins(message):
 
 
 
-ALL_NAMES_FILE = 'all_names_of_photos.txt'
+
 
 @bot.message_handler(commands=['загрузить_фото', 'upload_photo'])
 def upload_photo(message):
@@ -725,11 +725,6 @@ def upload_photo(message):
             debug_message(message, f"Фотография с названием '{photo_name}' уже существует в папке проверки:")
             return
 
-        if check_photo_name(photo_name.lower()):
-            bot.reply_to(message, f"Фотография с названием '{photo_name}' уже существует, среди всех фото!")
-            debug_message(message, f"Фотография с названием '{photo_name}' уже существует, среди всех фото:")
-            return
-
         file_name = os.path.join(CHECK_FOLDER, f'{photo_name}.png')
 
         with open(file_name, 'wb') as new_file:
@@ -746,6 +741,7 @@ def upload_photo(message):
         bot.reply_to(message, f"Произошла ошибка при загрузке фотографии: {e}. Пожалуйста, попробуйте загрузить фото ещё раз.")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('approve_photo'))
+@bot.callback_query_handler(func=lambda call: call.data.startswith('approve_photo'))
 def approve_photo(call):
     photo_name = call.data.split('_')[2]
     user_id = int(call.data.split('_')[3])
@@ -760,15 +756,34 @@ def approve_photo(call):
                 bot.send_message(message.chat.id, f"Укажите путь, куда переместить фотографию.")
                 bot.register_next_step_handler(message, move_photo, photo_name, user_id, chat_id, message_id)
             else:
-                os.remove(os.path.join(CHECK_FOLDER, f'{photo_name}.png'))
-                bot.send_message(user_id, f"Фотография {photo_name} не одобрена и удалена.")
-                bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
+                # Запрос причины отклонения
+                bot.send_message(call.message.chat.id, f"Пожалуйста, укажите причину отклонения фотографии {photo_name}.")
+                bot.register_next_step_handler(call.message, ask_rejection_reason, photo_name, user_id, chat_id, message_id)
         else:
             bot.send_message(message.chat.id, "Сообщение уже изменено.")
     except OSError as e:
         bot.send_message(message.chat.id, f"Произошла ошибка: {e}")
     except Exception as e:
         bot.send_message(message.chat.id, f"Произошла неожиданная ошибка: {e}")
+
+def ask_rejection_reason(message, photo_name, user_id, chat_id, message_id):
+    reason = message.text.strip()
+
+    try:
+        # Удаляем фотографию
+        os.remove(os.path.join(CHECK_FOLDER, f'{photo_name}.png'))
+
+        # Сообщаем пользователю об отклонении и причине
+        bot.send_message(user_id, f"Ваша фотография {photo_name} была отклонена. Причина: {reason}")
+        
+        # Отправляем причину в исходный чат
+        bot.send_message(chat_id, f"Фотография {photo_name} отклонена. Причина: {reason}")
+
+        # Убираем кнопки с сообщения
+        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
+
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Произошла ошибка при обработке отклонения фотографии: {e}")
 
 def move_photo(message, photo_name, user_id, chat_id, message_id):
     try:
@@ -816,8 +831,6 @@ def move_photo_to_destination(photo_name, user_id, chat_id, message_id, destinat
 
         bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
 
-        write_new_name(photo_name)
-
         bot.send_message(DEVELOPER_ID, 'Изменить файл с путями: /rewrite')
     except Exception as e:
         bot.send_message(chat_id, f"Произошла ошибка при перемещении фотографии: {e}")
@@ -850,22 +863,6 @@ def approve_keyboard(photo_name, user_id):
     reject_button = types.InlineKeyboardButton(text="Отклонить", callback_data=f"approve_photo_{photo_name}_{user_id}_no")
     keyboard.row(approve_button, reject_button)
     return keyboard
-
-def read_all_names():
-    with open(ALL_NAMES_FILE, 'r', encoding='utf-8') as file:
-        names = set(line.strip().lower() for line in file)
-        return names
-
-def write_new_name(photo_name):
-    capitalized_name = capitalize_photo_name(photo_name)
-    with open(ALL_NAMES_FILE, 'a', encoding='utf-8') as file:
-        file.write(capitalized_name + '\n')
-
-def check_photo_name(photo_name):
-    all_names = read_all_names()
-    result = photo_name.lower() in all_names
-    print(f"Проверка наличия фотографии {photo_name.lower()} в файле: {result}")
-    return photo_name.lower() in all_names
 
 
 
@@ -1246,8 +1243,7 @@ def send_apk(message):
     handle_message(message)
 
     chat_id = message.chat.id
-    command_name = 'raids' 
-    apk_name = 'Базы_LDoE_1.4_Repack_by_DanlokPlay'
+    command_name = 'raids'
     
     if message.chat.type != 'private':
         if not check_access(chat_id, command_name):
@@ -1255,21 +1251,20 @@ def send_apk(message):
             return
         if not cool_down(message, command_name):
             return
-        
-    path_file = os.path.join(APK_FOLDER, apk_name + ".apk")
-    
-    try:
-        with open(path_file, 'rb') as apk_file:
-            bot.send_document(chat_id, apk_file, caption="Приложение с Базами LDoE (с Android 4.1, armeabi-v7a)\nВерсия 1.4\n- Убрана реклама!\n- Обновлена иконка, задний фон, начальный экран у приложения\n- Обновлены текстуры предметов\n- Уменьшен вес приложения\n- Изменено имя пакета\n- Есть подпись приложения")
-            
-        debug_message(message, 'Отправлен APK файл')
-        print('APK файл отправлен')
-    except Exception as e:
-        print(f"Ошибка при отправке файла: {e}")
-    finally:
-        del apk_file  # Удаление ссылки на объект файла
-        gc.collect()  # Принудительный вызов сборщика мусора
 
+    try:
+        bot.send_message(
+            chat_id,
+            "Скачать Базы LDoE (с Android 5.1):\n"
+            "AppGallery: https://appgallery.huawei.ru/app/C111738085\n"
+            "RuStore: https://www.rustore.ru/catalog/app/com.DanlokPlay.LDoEBases\n"
+            "Сайт: https://danlokplay.github.io/LDoEBases/\n"
+            "tg_thx - Вот ещё код на 500 баллов))0)"
+        )
+        debug_message(message, 'Отправлены ссылки на Базы LDoE')
+        print('Отправлены ссылки на Базы LDoE')
+    except Exception as e:
+        print(f"Ошибка при отправке сообщения: {e}")
 
 
 
@@ -1470,7 +1465,8 @@ def handle_rewrite_command(message):
         keyboard = types.InlineKeyboardMarkup()
         rewrite_photos_button = types.InlineKeyboardButton(text="Перезаписать photos.txt", callback_data="rewrite_photos")
         rewrite_videos_button = types.InlineKeyboardButton(text="Перезаписать videos.txt", callback_data="rewrite_videos")
-        keyboard.add(rewrite_photos_button, rewrite_videos_button)
+        rewrite_log_times_button = types.InlineKeyboardButton(text="Перезаписать log_times.txt", callback_data="rewrite_log_times")
+        keyboard.add(rewrite_photos_button, rewrite_videos_button, rewrite_log_times_button)
         
         bot.send_message(message.chat.id, "Выберите файл для перезаписи:", reply_markup=keyboard)
     except Exception as e:
@@ -1488,6 +1484,8 @@ def handle_rewrite_callback(call):
             file_path = 'photos.txt'
         elif call.data == 'rewrite_videos':
             file_path = 'videos.txt'
+        elif call.data == 'rewrite_log_times':
+            file_path = 'log_times.txt'
         else:
             bot.answer_callback_query(call.id, "Неверный выбор.")
             debug_message(call.message, f"Неверный выбор файла для его перезаписи")
@@ -1501,7 +1499,7 @@ def handle_rewrite_callback(call):
             return
 
         # Отправка текущего содержимого файла пользователю
-        bot.send_message(call.message.chat.id, f"Текущее содержимое {file_path}:\n\n{current_content}")
+        bot.send_message(call.message.chat.id, f"{file_path}:\n\n{current_content}")
         
         # Запрос нового содержимого у пользователя
         bot.send_message(call.message.chat.id, f"Отправьте новое содержимое для файла {file_path}.")
@@ -1527,9 +1525,26 @@ def process_new_content(message, file_path):
 
 
 
-def save_log_interval(interval):
-    with open(LOG_INTERVAL, 'w', encoding='utf-8') as f:
-        f.write(str(interval))
+
+@bot.message_handler(commands=['кд_лог', 'cd_log'])
+def send_log_times(message):
+    handle_message(message)
+    
+    # Проверка прав доступа
+    if message.from_user.id != DEVELOPER_ID:
+        bot.reply_to(message, "У вас нет прав для использования этой команды.")
+        return
+
+    try:
+        log_times = read_log_times()  # Чтение времени из файла
+        if log_times:
+            formatted_times = '\n'.join(log_times)  # Форматирование времени для отправки
+            bot.reply_to(message, f"Время отправки логов:\n{formatted_times}")
+        else:
+            bot.reply_to(message, "Нет времени для отправки логов или файл пуст.")
+    except Exception as e:
+        bot.reply_to(message, f"Произошла ошибка при чтении времени логов: {e}")
+
 
 
 def send_logs():
@@ -1548,56 +1563,62 @@ def send_logs():
     except Exception as e:
         bot.send_message(DEVELOPER_ID, f'Ошибка при отправке логов: {str(e)}')
 
-def set_log_interval(interval_minutes):
-    global current_log_interval
-    current_log_interval = interval_minutes
-    save_log_interval(interval_minutes)
+def read_log_times():
+    """Чтение времени отправки логов из файла."""
+    if os.path.exists(LOG_TIMES_FILE):
+        with open(LOG_TIMES_FILE, 'r', encoding='utf-8') as f:
+            times = f.readlines()
+        
+        # Фильтрация и проверка правильного формата времени
+        valid_times = []
+        time_pattern = re.compile(r"^\d{2}:\d{2}(:\d{2})?$")  # Регулярное выражение для формата HH:MM или HH:MM:SS
+        for time in times:
+            stripped_time = time.strip()
+            if time_pattern.match(stripped_time):
+                valid_times.append(stripped_time)
+            else:
+                bot.send_message(DEVELOPER_ID, f"Неверный формат времени: {stripped_time}. Ожидается формат HH:MM или HH:MM:SS.")
+        
+        return valid_times
+    return []
+
+def schedule_log_sending():
+    """Запланировать отправку логов на основе времени из файла."""
     schedule.clear()  # Очистить все запланированные задачи
-    schedule.every(interval_minutes).minutes.do(send_logs)
 
-
-
-@bot.message_handler(commands=['установить_время_лога', 'set_time_log'])
-def set_interval(message):
-    handle_message(message)
-    try:
-        if message.from_user.id != DEVELOPER_ID:
-            bot.reply_to(message, "Извините, у вас нет прав на выполнение этой команды.")
-            debug_message(message, 'Попытался изменить КД у log:')
-            return
-        interval = int(message.text.split()[1])
-        if 1 <= interval <= 1440:  # Проверяем, что интервал в минутах от 1 минуты до 1 дня (1440 минут)
-            set_log_interval(interval)
-            bot.send_message(message.chat.id, f'Интервал логирования установлен на {interval} минут.')
-            debug_message(message, f'Интервал логирования изменен на {interval} минут')
-        else:
-            bot.send_message(message.chat.id, 'Интервал должен быть от 1 минуты до 1 дня (1440 минут).')
-    except (IndexError, ValueError):
-        bot.send_message(message.chat.id, 'Пожалуйста, укажите интервал в минутах. Пример: /установить_время_лога 60')
-
-
-
-
-
-def load_log_interval():
-    if os.path.exists(LOG_INTERVAL):
-        with open(LOG_INTERVAL, 'r', encoding='utf-8') as f:
-            return int(f.read().strip())
-    return 60  # По умолчанию 60 минут
-
-
-@bot.message_handler(commands=['кд_лог', 'cd_log'])
-def get_interval(message):
-    handle_message(message)
-    if message.from_user.id != DEVELOPER_ID:
-        bot.reply_to(message, "Извините, у вас нет прав на выполнение этой команды.")
-        debug_message(message, 'Попытался просмотреть КД у log:')
+    times = read_log_times()
+    if not times:
+        bot.send_message(DEVELOPER_ID, 'Нет допустимого времени для отправки логов. Расписание не установлено.')
         return
-    bot.send_message(message.chat.id, f'Текущий интервал логирования: {current_log_interval} минут.')
 
-# Загрузка интервала логирования при старте
-current_log_interval = load_log_interval()
-set_log_interval(current_log_interval)
+    for log_time in times:
+        schedule.every().day.at(log_time).do(send_logs)
+
+def process_new_content(message, file_path):
+    try:
+        new_content = message.text.strip()
+        
+        # Перезапись файла с новым содержимым
+        rewrite_file(file_path, new_content)
+        
+        bot.reply_to(message, f"Файл {file_path} успешно перезаписан.")
+        debug_message(message, f"Файл {file_path} успешно перезаписан")
+
+        # Перепланировать задачи, если файл `log_times.txt` был перезаписан
+        if file_path == 'log_times.txt':
+            schedule_log_sending()
+            bot.send_message(message.chat.id, "Расписание отправки логов обновлено.")
+    
+    except Exception as e:
+        bot.reply_to(message, f"Произошла ошибка при перезаписи файла: {e}")
+
+def rewrite_file(file_path, content):
+    """Перезапись файла с новым содержимым."""
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+# Запуск планировщика при старте
+schedule_log_sending()
 
 # Запуск планировщика в отдельном потоке
 def run_scheduler():
@@ -1607,9 +1628,6 @@ def run_scheduler():
 
 scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
 scheduler_thread.start()
-   
-
-
 
 # Отправка логов при запуске бота
 send_logs()

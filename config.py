@@ -1,4 +1,4 @@
-API_TOKEN = '6064246639:AAE-9Np2IM6rSAXlCOoxql6rgeLNd1QKcZI'
+API_TOKEN = '7154693387:AAGqSonvo0moS-CTON87M3i5tx4PIQmM37M'
 #CHANNEL_URL = 'https://t.me/KatomanD'
 #CHANNEL_ID = '@KatomanD'
 #CHAT_ID = '-1001969870941'
@@ -6,7 +6,6 @@ DEVELOPER_ID = 1375077159
 #API_URL = "https://api.telegram.org/bot{}/sendMessage".format(token)
 LOG_FILE = 'logs.txt'
 TEMP_LOG_FILE = 'temp_logs.txt'
-LOG_INTERVAL = 'log_interval.txt'
+LOG_TIMES_FILE = 'log_times.txt'
 CHECK_FOLDER = 'check/'
 INFO_FOLDER = 'info/'
-APK_FOLDER = 'apk/'
