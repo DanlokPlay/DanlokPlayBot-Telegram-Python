@@ -1,8 +1,9 @@
 from config import API_TOKEN, DEVELOPER_ID, LOG_FILE, TEMP_LOG_FILE, LOG_TIMES_FILE, CHECK_FOLDER, INFO_FOLDER
-from datetime import datetime, timedelta
+from datetime import datetime
 import time
 from random import randint
 import random
+
 
 import re
 import os
@@ -14,6 +15,7 @@ from telebot import types
 import threading
 import schedule
 
+import requests
 
 token = API_TOKEN
 bot = telebot.TeleBot(token)
@@ -1643,4 +1645,12 @@ scheduler_thread.start()
 send_logs()
 
 # Запуск бота
-bot.infinity_polling(none_stop=True)
+while True:
+    try:
+        bot.infinity_polling(timeout=10, long_polling_timeout=20, none_stop=True)
+    except requests.exceptions.ReadTimeout:
+        print("Read timeout, повторная попытка...")
+        time.sleep(5)  # Ожидание перед новой попыткой
+    except requests.exceptions.ConnectionError:
+        print("Проблема с подключением, повторная попытка...")
+        time.sleep(5)  # Ожидание перед новой попыткой
