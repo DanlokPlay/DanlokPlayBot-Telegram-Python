@@ -1270,7 +1270,7 @@ def send_apk(message):
             "Скачать Базы LDoE (с Android 6.0):\n"
             "AppGallery: https://appgallery.huawei.ru/app/C111738085\n"
             "RuStore: https://www.rustore.ru/catalog/app/com.DanlokPlay.LDoEBases\n"
-            "Скачать Базы LDoE (с Android 5.1 и 6.0):"
+            "Скачать Базы LDoE (с Android 5.1 и 6.0):\n"
             "Сайт: https://danlokplay.github.io/LDoEBases/\n"
         )
         debug_message(message, 'Отправлены ссылки на Базы LDoE')
