@@ -1267,11 +1267,11 @@ def send_apk(message):
     try:
         bot.send_message(
             chat_id,
-            "Скачать Базы LDoE (с Android 6.0):\n"
-            "AppGallery: https://appgallery.huawei.ru/app/C111738085\n"
-            "RuStore: https://www.rustore.ru/catalog/app/com.DanlokPlay.LDoEBases\n"
-            "Скачать Базы LDoE (с Android 5.1 и 6.0):\n"
-            "Сайт: https://danlokplay.github.io/LDoEBases/\n"
+            "Скачать Базы LDoE \n Android 6.0:\n"
+            "AppGallery:\n https://appgallery.huawei.ru/app/C111738085\n"
+            "RuStore:\n https://www.rustore.ru/catalog/app/com.DanlokPlay.LDoEBases\n"
+            "Скачать Базы LDoE (с Android 5.1)\n (Все архивы, качаются с Гугл Диска):\n"
+            "Сайт: http://ldoebases.ddns.net/\n"
         )
         debug_message(message, 'Отправлены ссылки на Базы LDoE')
         print('Отправлены ссылки на Базы LDoE')
