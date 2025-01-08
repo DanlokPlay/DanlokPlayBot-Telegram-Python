@@ -1243,11 +1243,11 @@ def send_apk(message):
     try:
         bot.send_message(
             chat_id,
-            "Скачать Базы LDoE \n Android 6.0:\n"
-            "AppGallery:\n https://appgallery.huawei.ru/app/C111738085\n"
-            "RuStore:\n https://www.rustore.ru/catalog/app/com.DanlokPlay.LDoEBases\n"
-            "Скачать Базы LDoE (с Android 5.1)\n (Гугл диск):\n"
-            "Сайт (разраб жлоб, не хочет домен покупать): http://150.241.65.170/\n"
+            "Скачать Базы LDoE \n\n"
+            "AppGallery (Android 6.0):\n https://appgallery.huawei.ru/app/C111738085\n"
+            "RuStore (Android 6.0):\n https://www.rustore.ru/catalog/app/com.DanlokPlay.LDoEBases\n\n"
+            "Скачать Базы LDoE (Гугл диск, разраб ЖЛОБ, не хочет домен покупать и на сервер апк загружать :D)\n"
+            "Сайт (с Android 5.1):\n http://150.241.65.170/\n\n"
             "Чат по игре: https://t.me/LastSurvivorsLDoE\n"
         )
         debug_message(message, 'Отправлены ссылки на Базы LDoE')
