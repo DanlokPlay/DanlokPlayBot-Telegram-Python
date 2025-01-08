@@ -309,30 +309,6 @@ def handle_message(message):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #######################                     ОБЩИЕ (без ограничений где-либо и как-либо)                      ############################
 
 
@@ -1270,8 +1246,9 @@ def send_apk(message):
             "Скачать Базы LDoE \n Android 6.0:\n"
             "AppGallery:\n https://appgallery.huawei.ru/app/C111738085\n"
             "RuStore:\n https://www.rustore.ru/catalog/app/com.DanlokPlay.LDoEBases\n"
-            "Скачать Базы LDoE (с Android 5.1)\n (Все архивы, качаются с Гугл Диска):\n"
-            "Сайт: http://150.241.65.170/\n"
+            "Скачать Базы LDoE (с Android 5.1)\n (Гугл диск):\n"
+            "Сайт (разраб жлоб, не хочет домен покупать): http://150.241.65.170/\n"
+            "Чат по игре: https://t.me/LastSurvivorsLDoE\n"
         )
         debug_message(message, 'Отправлены ссылки на Базы LDoE')
         print('Отправлены ссылки на Базы LDoE')
