@@ -306,7 +306,7 @@ def handle_message(message):
 
 
 # Функция для проверки санкций
-def check_user_sanctions(user_id):
+def check_user_sanctions(user_id, message):
     try:
         # Подключаемся к базе данных
         conn = sqlite3.connect('users.db')
@@ -318,9 +318,12 @@ def check_user_sanctions(user_id):
 
         # Если результат найден и sanctions = Да
         if result and result[0] == "Да":
+            debug_message(message, f'{user_id}- Применены санкции, команда не отправлена')
             return True  # Пользователь заблокирован
+        
 
         return False  # Пользователь не заблокирован
+
 
     except sqlite3.Error as e:
         print(f"Ошибка при работе с базой данных: {e}")
@@ -450,7 +453,7 @@ def thank_you(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
 
@@ -479,7 +482,7 @@ def custom_commands(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
     
@@ -539,7 +542,7 @@ def developer_commands(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
     
@@ -572,7 +575,7 @@ def start_code(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
     
@@ -642,7 +645,7 @@ def start_codes(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
     
@@ -696,7 +699,7 @@ def start_coins(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
     
@@ -736,7 +739,7 @@ def upload_photo(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
     
@@ -911,7 +914,7 @@ def choice (message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
     """command_name = 'photo'
@@ -990,7 +993,7 @@ def handle_videos_command(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
     
@@ -1022,7 +1025,7 @@ def list_photos_commads(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
     
@@ -1069,7 +1072,7 @@ def bot_updates(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
     
@@ -1100,7 +1103,7 @@ def last_updates(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
     
@@ -1136,7 +1139,7 @@ def top_users(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
     
@@ -1224,7 +1227,7 @@ def send_random_phrase(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
     
@@ -1253,7 +1256,7 @@ def send_apk(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
     
@@ -1291,7 +1294,7 @@ def handle_update_command(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id):
+    if check_user_sanctions(user_id, message):
         bot.reply_to(message, "Не-а")
         return 
     
