@@ -1313,6 +1313,9 @@ def handle_update_command(message):
         # Извлекаем данные для отправки
         json_data = extract_json(new_version)
         send_update_message(chat_id, json_data)
+
+        debug_message(message, 'Отправлено последнее обновление игры на сервере')
+        print('Отправлено последнее обновление игры на сервере')
         
     except Exception as e:
         bot.reply_to(message, f"Произошла ошибка: {e}")
