@@ -319,6 +319,7 @@ def check_user_sanctions(user_id, message):
         # Если результат найден и sanctions = Да
         if result and result[0] == "Да":
             debug_message(message, f'{user_id}- Применены санкции, команда не отправлена')
+            print("Применены санкции, команда не отправлена!")
             return True  # Пользователь заблокирован
         
 
