@@ -1306,12 +1306,14 @@ def handle_update_command(message):
         # Ищем новую версию
         new_version = find_latest_version(version)
         
+        # Обновляем версию, если новая версия найдена
         if new_version > version:
             update_version(new_version)
-            json_data = extract_json(new_version)
-            send_update_message(chat_id, json_data)
-        else:
-            bot.reply_to(message, "Обновлений нет.")
+        
+        # Извлекаем данные для отправки
+        json_data = extract_json(new_version)
+        send_update_message(chat_id, json_data)
+        
     except Exception as e:
         bot.reply_to(message, f"Произошла ошибка: {e}")
 
