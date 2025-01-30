@@ -313,7 +313,7 @@ def check_user_sanctions(user_id):
         cursor = conn.cursor()
 
         # Запрос для получения значения sanctions для данного пользователя
-        cursor.execute("SELECT sanctions FROM users WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT sanctions FROM users WHERE id = ?", (user_id,))
         result = cursor.fetchone()
 
         # Если результат найден и sanctions = Да
