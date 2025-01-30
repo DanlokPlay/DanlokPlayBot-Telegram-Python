@@ -679,7 +679,7 @@ def start_codes(message):
 
     month_name = month_names.get(current_month)
     if month_name:
-        filename = f'content/коды/{month_name} {current_year}.png'
+        filename = f'коды/{month_name} {current_year}.png'
         with open(filename, 'rb') as file:
             bot.send_photo(chat_id, file, f'Коды на {month_name} {current_year}')
         print("Коды на месяцы высланы!")
