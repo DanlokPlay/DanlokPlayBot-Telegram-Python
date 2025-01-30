@@ -1345,14 +1345,32 @@ def update_version(new_version):
 def extract_json(version):
     url = f"{BASE_URL}p{version}.json.gz"
     response = requests.get(url)
+    
     if response.status_code == 200:
         os.makedirs(UPDATE_FOLDER, exist_ok=True)
         file_path = os.path.join(UPDATE_FOLDER, f"p{version}.json")
-        with gzip.open(response.content) as gz_file:
-            with open(file_path, 'wb') as json_file:
-                json_file.write(gz_file.read())
-        with open(file_path, 'r', encoding='utf-8') as json_file:
-            return json.load(json_file)
+        
+        # Открываем gzip-архив и извлекаем данные
+        try:
+            with gzip.open(response.content, 'rb') as gz_file:
+                data = gz_file.read()
+                
+                # Проверяем на наличие нулевых байтов в данных
+                if b'\x00' in data:
+                    raise ValueError("Нулевой байт найден в данных")
+                
+                # Сохраняем данные в файл
+                with open(file_path, 'wb') as json_file:
+                    json_file.write(data)
+                
+                # Преобразуем данные в JSON
+                with open(file_path, 'r', encoding='utf-8') as json_file:
+                    return json.load(json_file)
+        
+        except Exception as e:
+            print(f"Ошибка при извлечении или обработке данных: {e}")
+            return None
+
     return None
 
 def send_update_message(chat_id, json_data):
