@@ -1288,45 +1288,10 @@ def send_apk(message):
 
 
 
-@bot.message_handler(commands=['update', 'обновление'])
-def handle_update_command(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Не-а")
-        return 
-    
-    try:
-        # Получаем текущую версию
-        version = get_current_version()
-        
-        # Ищем новую версию
-        new_version = find_latest_version(version)
-        
-        # Обновляем версию, если новая версия найдена
-        if new_version > version:
-            update_version(new_version)
-        
-        # Извлекаем данные для отправки
-        json_data = extract_json(new_version)
-        send_update_message(chat_id, json_data)
-
-        debug_message(message, 'Отправлено последнее обновление игры на сервере')
-        print('Отправлено последнее обновление игры на сервере')
-        
-    except Exception as e:
-        bot.reply_to(message, f"Произошла ошибка: {e}")
-
 def get_current_version():
-    try:
-        with open(INFORMATION_FILE, 'r', encoding='utf-8') as file:
-            data = json.load(file)
-            return int(data.get("versionUpdate", 197))
-    except FileNotFoundError:
-        return 197
+    with open(INFORMATION_FILE, 'r', encoding='utf-8') as file:
+        data = json.load(file)
+        return int(data.get("versionUpdate"))
 
 def find_latest_version(version):
     while True:
@@ -1338,48 +1303,107 @@ def find_latest_version(version):
             break
     return version
 
-def update_version(new_version):
-    with open(INFORMATION_FILE, 'w', encoding='utf-8') as file:
-        json.dump({"versionUpdate": new_version}, file)
+def download_and_extract_file(version):
+    # Формируем имена для файлов
+    compressed_file_name = os.path.join(UPDATE_FOLDER, f"p{version}.json.gz")
+    uncompressed_file_name = os.path.join(UPDATE_FOLDER, f"p{version}.json")
 
-def extract_json(version):
+    # Проверяем, существует ли уже файл
+    if os.path.exists(compressed_file_name):
+        print(f"Файл p{version} уже существует. Скачивание пропущено.")
+        # Если файл уже существует, распаковываем его заново
+        return extract_json_from_file(compressed_file_name, uncompressed_file_name)
+
+    # Если файла нет, скачиваем его
     url = f"{BASE_URL}p{version}.json.gz"
     response = requests.get(url)
-    
-    if response.status_code == 200:
-        os.makedirs(UPDATE_FOLDER, exist_ok=True)
-        file_path = os.path.join(UPDATE_FOLDER, f"p{version}.json")
-        
-        # Открываем gzip-архив и извлекаем данные
-        try:
-            with gzip.open(response.content, 'rb') as gz_file:
-                data = gz_file.read()
-                
-                # Проверяем на наличие нулевых байтов в данных
-                if b'\x00' in data:
-                    raise ValueError("Нулевой байт найден в данных")
-                
-                # Сохраняем данные в файл
-                with open(file_path, 'wb') as json_file:
-                    json_file.write(data)
-                
-                # Преобразуем данные в JSON
-                with open(file_path, 'r', encoding='utf-8') as json_file:
-                    return json.load(json_file)
-        
-        except Exception as e:
-            print(f"Ошибка при извлечении или обработке данных: {e}")
-            return None
 
+    if response.status_code == 200:
+        print(f"Файл p{version} найден и загружен.")
+        
+        # Сохраняем сжатый файл
+        os.makedirs(UPDATE_FOLDER, exist_ok=True)
+        with open(compressed_file_name, "wb") as f:
+            f.write(response.content)
+
+        # Распаковываем архив
+        return extract_json_from_file(compressed_file_name, uncompressed_file_name)
+
+    print(f"Файл p{version} недоступен.")
     return None
+
+def extract_json_from_file(compressed_file_name, uncompressed_file_name):
+    # Распаковка архива
+    with gzip.open(compressed_file_name, "rb") as gz:
+        with open(uncompressed_file_name, "wb") as json_file:
+            json_file.write(gz.read())
+
+    # Чтение распакованного JSON
+    with open(uncompressed_file_name, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    print(f"Файл {uncompressed_file_name} обработан.")
+    return data
+
+def update_version_in_file(new_version):
+    # Обновляем версию в INFORMATION_FILE
+    try:
+        with open(INFORMATION_FILE, 'r+', encoding='utf-8') as file:
+            data = json.load(file)
+            data["versionUpdate"] = new_version  # Обновляем версию
+            file.seek(0)  # Возвращаемся в начало файла
+            json.dump(data, file, ensure_ascii=False, indent=4)  # Перезаписываем файл
+            file.truncate()  # Обрезаем файл до текущего размера
+        print(f"Файл {INFORMATION_FILE} обновлен до версии {new_version}")
+    except Exception as e:
+        print(f"Не удалось обновить файл {INFORMATION_FILE}: {e}")
 
 def send_update_message(chat_id, json_data):
     if json_data:
         russian_text = json_data.get("Russian", "Нет данных")
         english_text = json_data.get("English", "No data")
-        message = f"<b>Обновление:</b>\n\n🇷🇺 {russian_text}\n\n🇺🇸 {english_text}"
+        message = f"<b> Последнее найденное ОБНОВЛЕНИЕ:</b>\n\n🇷🇺 {russian_text}\n\n🇺🇸 {english_text}"
         bot.send_message(chat_id, message, parse_mode="HTML")
 
+# Обработчик команды /update
+@bot.message_handler(commands=['update', 'обновление'])
+def handle_update_command(message):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+
+    if check_user_sanctions(user_id, message):
+        bot.reply_to(message, "Не-а")
+        return
+    
+    try:
+        version = get_current_version()  # Получаем текущую версию
+        new_version = find_latest_version(version)  # Находим последнюю доступную версию
+
+        # Если новая версия отличается от текущей
+        if new_version > version:
+            json_data = download_and_extract_file(new_version)  # Загружаем и распаковываем файл
+
+            if json_data:
+                send_update_message(chat_id, json_data)  # Отправляем обновления пользователю
+                update_version_in_file(new_version)  # Обновляем версию в файле только после успешного скачивания
+                debug_message(message, 'Отправлено последнее найденное обновление на сервере по LDoE')
+                print('Отправлено последнее найденное обновление на сервере по LDoE')
+            else:
+                bot.reply_to(message, "Не удалось загрузить обновление.")
+                print("Не удалось загрузить обновление.")
+        else:
+            # Если новая версия не найдена, отправляем последнее доступное обновление
+            json_data = download_and_extract_file(version)  # Отправляем текущее обновление
+            if json_data:
+                send_update_message(chat_id, json_data)  # Отправляем текущее обновление пользователю
+                debug_message(message, 'Отправлено текущее доступное обновление.')
+                print('Отправлено текущее доступное обновление.')
+            else:
+                bot.reply_to(message, "Не удалось загрузить обновление.")
+                print("Не удалось загрузить обновление.")
+
+    except Exception as e:
+        bot.reply_to(message, f"Произошла ошибка: {e}")
 
 
 

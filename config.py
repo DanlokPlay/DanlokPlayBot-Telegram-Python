@@ -9,5 +9,5 @@ TEMP_LOG_FILE = 'temp_logs.txt'
 CHECK_FOLDER = 'check/'
 INFO_FOLDER = 'info/'
 INFORMATION_FILE = "information.json"
-UPDATE_FOLDER = "gameUpdate"
+UPDATE_FOLDER = "gameUpdate/"
 BASE_URL = "https://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/"
