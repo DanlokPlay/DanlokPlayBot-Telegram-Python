@@ -11,3 +11,4 @@ INFO_FOLDER = 'info/'
 INFORMATION_FILE = "information.json"
 UPDATE_FOLDER = "gameUpdate/"
 BASE_URL = "https://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/"
+CODES_FOLDER = 'codes/'
