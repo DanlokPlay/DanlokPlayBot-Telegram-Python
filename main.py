@@ -1,42 +1,34 @@
-from config import API_TOKEN, DEVELOPER_ID, LOG_FILE, TEMP_LOG_FILE, CHECK_FOLDER, INFO_FOLDER, INFORMATION_FILE, UPDATE_FOLDER, BASE_URL, CODES_FOLDER
-from random import randint
+from config import API_TOKEN, DEVELOPER_ID, LOG_FILE, TEMP_LOG_FILE, CHECK_FOLDER, INFO_FOLDER, UPDATE_FOLDER, CODES_FOLDER, CONFIG_URL
 import random
-
-
-import re
-import os
-import glob
 
 import telebot
 from telebot import types
 
-import threading
-import schedule
+import re
+import os
 
 from datetime import datetime
 import pytz
-TIMEZONE = pytz.timezone('Europe/Moscow')
 
 import requests
 import gzip
 import json
 
+import sqlite3
+
 token = API_TOKEN
 bot = telebot.TeleBot(token)
-
-import time
-
-import sqlite3
+TIMEZONE = pytz.timezone('Europe/Moscow')
 
 # Регистрация обработчика сообщений
 #@bot.message_handler(func=lambda message: message)  (Улавливает каждое сообщение)
 # Вызывается при выполнении той или иной команды
 def handle_message(message): 
     user_id = message.from_user.id
-    username = message.from_user.username or ''
-    first_name = message.from_user.first_name or ''
-    last_name = message.from_user.last_name or ''
-    current_time = datetime.now(TIMEZONE).strftime("%H:%M:%S, %d:%m:%Y")
+    username = message.from_user.username or None
+    first_name = message.from_user.first_name or None
+    last_name = message.from_user.last_name or None
+    current_time = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
 
     with sqlite3.connect('users.db') as conn:
         cursor = conn.cursor()
@@ -48,11 +40,10 @@ def handle_message(message):
         if existing_user:
             old_username, old_name, old_surname = existing_user
 
-            # Проверяем, изменились ли данные (время команды не учитываем)
             if (username != old_username) or (first_name != old_name) or (last_name != old_surname):
-                cursor.execute('''
+                cursor.execute(''' 
                     UPDATE users 
-                    SET username = ?, name = ?, surname = ?, last_time = ?
+                    SET username = ?, name = ?, surname = ?, last_time = ? 
                     WHERE id = ?
                 ''', (username, first_name, last_name, current_time, user_id))
                 print(f"Обновлены данные пользователя: {user_id}")
@@ -60,7 +51,7 @@ def handle_message(message):
             else:
                 cursor.execute('UPDATE users SET last_time = ? WHERE id = ?', (current_time, user_id))
         else:
-            cursor.execute('''
+            cursor.execute(''' 
                 INSERT INTO users (id, username, name, surname, last_time) 
                 VALUES (?, ?, ?, ?, ?)
             ''', (user_id, username, first_name, last_name, current_time))
@@ -69,31 +60,20 @@ def handle_message(message):
 
         conn.commit()
 
+########################                    МНОГО ИСПОЛЬЗУЕМЫЕ ФУНКЦИИ                     ###############################
 
-#######################                     ВПОМОГАТЕЛЬНЫЕ ФУНКЦИИ                      ############################
+# Добавление/обновление пользователя в БД и проверка его на ОГРАНИЧЕНИЯ
+def allow_command(message):
+    handle_message(message)
 
-# Вывод времени в выбранной TIMEZONE
-def get_current_time_in_timezone():
-    now = datetime.now(TIMEZONE)
-    return now.strftime("%Y-%m-%d %H:%M:%S")
+    user_id = message.from_user.id
 
-# Создение БД
-def init_db():
-    """Создаёт таблицу пользователей (вызывать при запуске бота)."""
-    with sqlite3.connect('users.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY,
-                username TEXT,
-                name TEXT,
-                surname TEXT,
-                sanctions TEXT DEFAULT 'Нет',
-                survival_points INTEGER DEFAULT 0,
-                last_time TEXT DEFAULT ''
-            )
-        ''')
-        conn.commit()
+    if check_user_sanctions(user_id, message):
+        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
+        return False
+    
+    return True
+
 
 # Отправка Log
 def debug_message(message, additional_text):
@@ -109,11 +89,12 @@ def debug_message(message, additional_text):
         bot.send_message(DEVELOPER_ID, f'Спасибо от @{username}')
 
     # Запись в лог-файл
-    log_entry = f'{current_time_msk} - {notification_text}\n'  # Используем текущее время по МСК
+    log_entry = f'{current_time_msk} - {notification_text}\n'
     with open(LOG_FILE, 'a', encoding='utf-8') as log_file:
         log_file.write(log_entry)
     with open(TEMP_LOG_FILE, 'a', encoding='utf-8') as temp_log_file:
         temp_log_file.write(log_entry)
+
 
 # Проверка САНКЦИЙ
 # Некоторым пользователи будут лишены возможности пользоваться ботом (Указываются вручную в БД)
@@ -133,30 +114,12 @@ def check_user_sanctions(user_id, message):
 
     return False
 
-# Чтение кодов из файла
-def read_codes_from_file(filename):
-    codes = {}
-    try:
-        with open(filename, 'r') as file:
-            lines = file.readlines()
-            for line in lines:
-                try:
-                    year_month, codes_str = line.strip().split('::')
-                    year, month = map(int, year_month.split('_'))
-                    
-                    day_codes = {}
-                    for day_code in codes_str.split(','):
-                        day, code = day_code.split(':')
-                        day_codes[int(day)] = code
-                    codes[(year, month)] = day_codes
-                except ValueError:
-                    print(f"Неправильный формат данных в строке: {line.strip()}")
-    except FileNotFoundError:
-        print(f"Файл '{filename}' не найден.")
-    except Exception as e:
-        print(f"Произошла ошибка: {e}")
-    
-    return codes
+#######################                     ВПОМОГАТЕЛЬНЫЕ ФУНКЦИИ                      ############################
+
+# Вывод времени в выбранной TIMEZONE
+def get_current_time_in_timezone():
+    now = datetime.now(TIMEZONE)
+    return now.strftime("%Y-%m-%d %H:%M:%S")
 
 
 # Функция для чтения случайной строки из файла
@@ -187,33 +150,23 @@ def start(message):
 
 @bot.message_handler(commands=['спасибо', 'thank_you'])
 def thank_you(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
+    if not allow_command(message):
+        return
     chat_id = message.chat.id
-
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
 
     bot.send_message(chat_id, "Тебе спасибо ^_^\n Теперь разработчик знает, что не зря время тратил :D")
     debug_message(message, 'Спасибо от ')
-    print(f"Пользователь {user_id} использовал /start")
+    print(f"Пользователь использовал /start")
 
 
 
 @bot.message_handler(commands=['м', 'монета', 'coin'])
 def start_coins(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
+    if not allow_command(message):
+        return
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
-
-    var = randint(0, 1)
+    var = random.randint(0, 1)
     heads = 'Орёл'
     tails = 'Решка'
     if var == 0:
@@ -229,20 +182,27 @@ def start_coins(message):
         debug_message(message, 'Монета подброшена (Решка):')
 
 
+@bot.message_handler(commands=['эй', 'hey'])
+def send_random_phrase(message):
+    if not allow_command(message):
+        return
+    chat_id = message.chat.id
+
+    bot.send_message(chat_id, get_random_phrase())
+
+    print('Запрошена случайная фраза') 
+    debug_message(message, f'Запрошена случайная фраза')
+
+
 
 #######################                        КОМАНДЫ                       #########################
 
 
 @bot.message_handler(commands=['info', 'инфо'])
 def custom_commands(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
+    if not allow_command(message):
+        return
     chat_id = message.chat.id
-
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
     
     path_file = INFO_FOLDER + "info.txt"
 
@@ -258,14 +218,9 @@ def custom_commands(message):
 
 @bot.message_handler(commands=['developer', 'разработчик'])
 def developer_commands(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
+    if not allow_command(message):
+        return
     chat_id = message.chat.id
-
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
     
     path_file = INFO_FOLDER + "developer.txt"
     
@@ -281,50 +236,51 @@ def developer_commands(message):
 
 @bot.message_handler(commands=['код', 'к', 'пароль', 'k', 'kod', 'code', 'password'])
 def start_code(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
+    if not allow_command(message):
+        return
     chat_id = message.chat.id
 
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
-    
     text = 'Код на сегодня выслан'
-    codes = read_codes_from_file('codes.txt')  # Загружаем коды каждый раз при вызове команды
+    
+    # Загружаем коды из сжатого JSON
+    filename = 'codes.json.gz'
+    try:
+        with gzip.open(filename, 'rt', encoding='utf-8') as file:
+            codes_data = json.load(file)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        codes_data = {}
+
+    # Получаем текущую дату
     current_datetime = datetime.now()
-    current_month = current_datetime.month
-    current_day = current_datetime.day
-    current_year = current_datetime.year
+    current_year = str(current_datetime.year)
+    current_month = f"{current_datetime.month:02d}"  # Делаем двузначным (например, "03")
+    current_day = str(current_datetime.day)
+
     daily_code = None
 
-    if (current_year, current_month) in codes:
-        day_codes = codes[(current_year, current_month)]
+    # Проверяем, есть ли коды для текущего месяца
+    if current_year in codes_data and current_month in codes_data[current_year]:
+        day_codes = codes_data[current_year][current_month]
         if current_day in day_codes:
             daily_code = day_codes[current_day]
             bot.send_message(chat_id, f"Текущий код:\n{daily_code}\nКоды на месяц: /codes")
         else:
             bot.send_message(chat_id, "Код на сегодня не найден.")
-            text = 'Код на сегодня не найдены'
+            text = 'Код на сегодня не найден'
     else:
         bot.send_message(chat_id, "Коды на этот месяц не найдены.")
         text = 'Коды на месяц не найдены'
-    debug_message(message, text)
 
+    debug_message(message, text)
     print("Пароль на сегодня выслан!", current_day, ':', daily_code)
 
 
 
 @bot.message_handler(commands=['коды', 'коды_на_месяц', 'месяц', 'бункер', 'бункер_альфа', 'codes'])
 def start_codes(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
+    if not allow_command(message):
+        return
     chat_id = message.chat.id
-
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
     
     current_datetime = datetime.now()
     current_month = current_datetime.month
@@ -359,14 +315,9 @@ def start_codes(message):
 
 @bot.message_handler(commands=['видео', 'video', 'в', 'v'])
 def handle_videos_command(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
+    if not allow_command(message):
+        return
     chat_id = message.chat.id
-
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
     
     try:
         with open('videos.txt', 'r', encoding='utf-8') as file:
@@ -381,14 +332,9 @@ def handle_videos_command(message):
 
 @bot.message_handler(commands=['пр_фото', 'пример_фото', 'пр_ф', 'пф', 'кеф', 'kef'])
 def list_photos_commads(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
+    if not allow_command(message):
+        return
     chat_id = message.chat.id
-
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
     
     with open('photos.txt', 'r', encoding='utf-8') as txt_file:
         photo_names = txt_file.readlines()
@@ -406,14 +352,9 @@ def list_photos_commads(message):
 
 @bot.message_handler(commands=['обновления_бота', 'bot_updates'])
 def bot_updates(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
+    if not allow_command(message):
+        return
     chat_id = message.chat.id
-
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
     
     path_file = INFO_FOLDER + "bot_updates.txt"
     
@@ -427,14 +368,9 @@ def bot_updates(message):
 
 @bot.message_handler(commands=['последнее_обновление_бота', 'last_bot_update'])
 def last_updates(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
+    if not allow_command(message):
+        return
     chat_id = message.chat.id
-
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
 
     path_file = INFO_FOLDER + "last_bot_update.txt"
     path_photo = INFO_FOLDER + "last_bot_update.png"
@@ -452,14 +388,9 @@ def last_updates(message):
 
 @bot.message_handler(commands=['топ', 'top'])
 def top_users(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
+    if not allow_command(message):
+        return
     chat_id = message.chat.id
-
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
 
     # Открытие базы данных с использованием контекстного менеджера
     with sqlite3.connect('users.db') as conn:
@@ -484,35 +415,11 @@ def top_users(message):
 
 
 
-@bot.message_handler(commands=['эй', 'hey'])
-def send_random_phrase(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
-    
-    phrase = get_random_phrase()
-    bot.send_message(chat_id, phrase)
-
-    print('Запрошена случайная фраза') 
-    debug_message(message, f'Запрошена случайная фраза')
-
-
-
 @bot.message_handler(commands=['рейды', 'raids'])
 def send_apk(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
+    if not allow_command(message):
+        return
     chat_id = message.chat.id
-
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
     
     bot.send_message(
         chat_id,
@@ -533,14 +440,9 @@ def send_apk(message):
 ##### Загрузка Фото #####
 @bot.message_handler(commands=['загрузить_фото', 'upload_photo'])
 def upload_photo(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
+    if not allow_command(message):
+        return
     chat_id = message.chat.id
-
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
     
     try:
         photo = message.reply_to_message.photo[-1]
@@ -699,14 +601,9 @@ def approve_keyboard(photo_name, user_id):
 
 @bot.message_handler(commands=['фото', 'ф', 'photo', 'ph'])
 def choice (message):
-    handle_message(message)
-
-    user_id = message.from_user.id
+    if not allow_command(message):
+        return
     chat_id = message.chat.id
-
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
 
     send_photo_by_name_pc(message)
 
@@ -719,9 +616,13 @@ def find_photo_in_folders(photo_name, folder):
     if folder.endswith("check"):
         return found_files
 
-    # Ищем файлы с заданным именем в текущей папке
-    search_pattern = os.path.join(folder, f"*{photo_name}.png")
-    found_files += glob.glob(search_pattern)
+    # Регулярное выражение для поиска файла с точным именем (игнорирование регистра)
+    pattern = re.compile(f"^{re.escape(photo_name)}\.png$", re.IGNORECASE)
+
+    # Перебираем файлы в текущей папке
+    for filename in os.listdir(folder):
+        if pattern.match(filename):  # Ищем точное совпадение с именем файла
+            found_files.append(os.path.join(folder, filename))
 
     # Перебираем подпапки и ищем в них
     subfolders = [f.path for f in os.scandir(folder) if f.is_dir()]
@@ -771,162 +672,149 @@ def send_photo_by_name_pc(message):
 
 
 #####    ПРОВЕРКА Обновлений на СЕРВЕРЕ   ##########
-def get_current_version():
-    with open(INFORMATION_FILE, 'r', encoding='utf-8') as file:
-        data = json.load(file)
-        return int(data.get("versionUpdate"))
-
-def find_latest_version(version):
-    while True:
-        url = f"{BASE_URL}p{version + 1}.json.gz"
-        response = requests.head(url)
-        if response.status_code == 200:
-            version += 1
-        else:
-            break
-    return version
-
-def download_and_extract_file(version):
-    # Формируем имена для файлов
-    compressed_file_name = os.path.join(UPDATE_FOLDER, f"p{version}.json.gz")
-    uncompressed_file_name = os.path.join(UPDATE_FOLDER, f"p{version}.json")
-
-    # Проверяем, существует ли уже файл
-    if os.path.exists(compressed_file_name):
-        print(f"Файл p{version} уже существует. Скачивание пропущено.")
-        # Если файл уже существует, распаковываем его заново
-        return extract_json_from_file(compressed_file_name, uncompressed_file_name)
-
-    # Если файла нет, скачиваем его
-    url = f"{BASE_URL}p{version}.json.gz"
+def download_and_extract_gz(url, output_file):
+    """Скачивает и разархивирует .gz файл, возвращает JSON-данные."""
     response = requests.get(url)
-
     if response.status_code == 200:
-        print(f"Файл p{version} найден и загружен.")
-        
-        # Сохраняем сжатый файл
-        os.makedirs(UPDATE_FOLDER, exist_ok=True)
-        with open(compressed_file_name, "wb") as f:
-            f.write(response.content)
-
-        # Распаковываем архив
-        return extract_json_from_file(compressed_file_name, uncompressed_file_name)
-
-    print(f"Файл p{version} недоступен.")
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        with open(output_file, "wb") as f:
+            f.write(gzip.decompress(response.content))
+        with open(output_file, "r", encoding="utf-8") as f:
+            return json.load(f)
     return None
 
-def extract_json_from_file(compressed_file_name, uncompressed_file_name):
-    # Распаковка архива
-    with gzip.open(compressed_file_name, "rb") as gz:
-        with open(uncompressed_file_name, "wb") as json_file:
-            json_file.write(gz.read())
 
-    # Чтение распакованного JSON
-    with open(uncompressed_file_name, "r", encoding="utf-8") as f:
-        data = json.load(f)
+def get_latest_versions():
+    """Получает информацию о последних версиях и их патчах."""
+    config_file = os.path.join(UPDATE_FOLDER, "ldoez_config.json")
+    config_data = download_and_extract_gz(CONFIG_URL, config_file)
+    if not config_data:
+        return None
 
-    print(f"Файл {uncompressed_file_name} обработан.")
-    return data
+    versions_info = []
+    for version_number, details in config_data.get("versions", {}).items():
+        version_code = details.get("version_code", "Unknown")
+        tag = details.get("tag", "Unknown")
+        patch_urls = details.get("patch_note_urls", [])
 
-def update_version_in_file(new_version):
-    # Обновляем версию в INFORMATION_FILE
-    try:
-        with open(INFORMATION_FILE, 'r+', encoding='utf-8') as file:
-            data = json.load(file)
-            data["versionUpdate"] = new_version  # Обновляем версию
-            file.seek(0)  # Возвращаемся в начало файла
-            json.dump(data, file, ensure_ascii=False, indent=4)  # Перезаписываем файл
-            file.truncate()  # Обрезаем файл до текущего размера
-        print(f"Файл {INFORMATION_FILE} обновлен до версии {new_version}")
-    except Exception as e:
-        print(f"Не удалось обновить файл {INFORMATION_FILE}: {e}")
+        if patch_urls:
+            patch_file_url = patch_urls[0]
+            patch_version = patch_file_url.split("/")[-1].split(".")[0]  # Получаем "pXXX"
 
-def send_update_message(chat_id, json_data):
-    if json_data:
-        russian_text = json_data.get("Russian", "Нет данных")
-        english_text = json_data.get("English", "No data")
-        message = f"<b> Последнее найденное ОБНОВЛЕНИЕ:</b>\n\n🇷🇺 {russian_text}\n\n🇺🇸 {english_text}"
-        bot.send_message(chat_id, message, parse_mode="HTML")
+            patch_file = os.path.join(UPDATE_FOLDER, f"{patch_version}.json")
+            patch_data = download_and_extract_gz(patch_file_url, patch_file) or {}
 
-# Обработчик команды /update
+            versions_info.append({
+                "version_code": version_code,
+                "tag": tag,
+                "version_number": version_number,  # Сохраняем номер версии
+                "patch_version": patch_version,
+                "patch_data_ru": patch_data.get("Russian", "Нет данных"),
+                "patch_data_us": patch_data.get("English", "No data")
+            })
+
+    return versions_info
+
+
+def send_update_message(chat_id, versions):
+    """Формирует и отправляет сообщение с информацией об обновлениях."""
+    message = ""
+    for version in versions:
+        message += (
+            f"<b>Версия:</b> {version['version_code']}\n"
+            f"<b>Тег:</b> {version['tag']}\n"
+            f"<b>Обновление:</b> {version['version_number']}\n"  # Теперь выводим номер версии
+            f"<b>Патч:</b> {version['patch_version']}\n"
+            f"🇷🇺 <b>RU:</b> {version['patch_data_ru']}\n"
+            f"🇺🇸 <b>US:</b> {version['patch_data_us']}\n\n"
+        )
+
+    bot.send_message(chat_id, message, parse_mode="HTML")
+
+
 @bot.message_handler(commands=['update', 'обновление'])
 def handle_update_command(message):
-    handle_message(message)
-
-    user_id = message.from_user.id
     chat_id = message.chat.id
-
-    if check_user_sanctions(user_id, message):
-        bot.reply_to(message, "Что-то не так, можно подправить, если подумать :D")
-        return 
-    
-    try:
-        version = get_current_version()  # Получаем текущую версию
-        new_version = find_latest_version(version)  # Находим последнюю доступную версию
-
-        # Если новая версия отличается от текущей
-        if new_version > version:
-            json_data = download_and_extract_file(new_version)  # Загружаем и распаковываем файл
-
-            if json_data:
-                send_update_message(chat_id, json_data)  # Отправляем обновления пользователю
-                update_version_in_file(new_version)  # Обновляем версию в файле только после успешного скачивания
-                debug_message(message, 'Отправлено последнее найденное обновление на сервере по LDoE')
-                print('Отправлено последнее найденное обновление на сервере по LDoE')
-            else:
-                bot.reply_to(message, "Не удалось загрузить обновление.")
-                print("Не удалось загрузить обновление.")
-        else:
-            # Если новая версия не найдена, отправляем последнее доступное обновление
-            json_data = download_and_extract_file(version)  # Отправляем текущее обновление
-            if json_data:
-                send_update_message(chat_id, json_data)  # Отправляем текущее обновление пользователю
-                debug_message(message, 'Отправлено текущее доступное обновление.')
-                print('Отправлено текущее доступное обновление.')
-            else:
-                bot.reply_to(message, "Не удалось загрузить обновление.")
-                print("Не удалось загрузить обновление.")
-
-    except Exception as e:
-        bot.reply_to(message, f"Произошла ошибка: {e}")
+    versions = get_latest_versions()
+    if versions:
+        send_update_message(chat_id, versions)
+    else:
+        bot.send_message(chat_id, "Не удалось получить информацию об обновлениях.")
 
 
 
 ##################                Только РАЗРАБОТЧИКА                #####################
 
-# Сначала записать коды, потом с упоминанием этого сообщения выполнить команду
 @bot.message_handler(commands=['записать_коды'])
 def write_codes(message):
     handle_message(message)
-    # Проверяем, что пользователь, вызвавший команду, является администратором
+    
     if message.from_user.id != DEVELOPER_ID:
         bot.reply_to(message, "Извините, у вас нет прав на выполнение этой команды.")
-        debug_message(message, 'Попытался записать коды:')
+        debug_message(message, 'Попытался записать коды: ')
         return
 
-    # Проверяем, что в сообщении, содержащем команду, есть данные для записи
     if not message.reply_to_message or not message.reply_to_message.text:
         bot.reply_to(message, "Не найдено сообщение для записи в файл.")
         debug_message(message, 'Не найдено сообщение для записи в файл кодов: ')
         return
 
-    # Получаем текст сообщения, на которое был отправлен ответ, и добавляем символ новой строки
     try:
         codes_text = message.reply_to_message.text.strip()
-        year_month, codes = codes_text.split('\n', 1)  # Разделяем год_месяц и коды
-        codes = codes.replace('\n', ',')  # Заменяем символы новой строки на запятые
-        codes_text = '\n' + f'{year_month}::{codes}'  # Форматируем строку с кодами
+        lines = codes_text.split('\n')
 
-        # Записываем полученные коды в файл
-        filename = 'codes.txt'
-        with open(filename, 'a') as file:
-            file.write(codes_text)
-        bot.reply_to(message, "Коды успешно записаны в файл.")
+        year = lines[0].strip()
+        month = lines[1].strip()
+        codes = '\n'.join(lines[2:]).strip()
+
+        filename = 'codes.json.gz'
+        try:
+            with gzip.open(filename, 'rt', encoding='utf-8') as file:
+                data = json.load(file)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            data = {}
+
+        # Создаем структуру, если её нет
+        if year not in data:
+            data[year] = {}
+        if month not in data[year]:
+            data[year][month] = {}
+
+        # Очистим старые дубли перед записью
+        month_data = {}
+
+        # Обрабатываем коды
+        codes_lines = codes.split('\n')
+        for line in codes_lines:
+            parts = line.split(' : ')
+            if len(parts) == 2:
+                code_range, code = parts
+                code = code.strip()
+                code_range = code_range.strip()
+
+                if '-' in code_range:
+                    start, end = map(int, code_range.split('-'))
+                    for i in range(start, end + 1):
+                        month_data[str(i)] = code
+                else:
+                    month_data[str(int(code_range))] = code
+            else:
+                bot.reply_to(message, f"Ошибка в строке: {line}. Ожидаемый формат: 'диапазон : код'")
+
+        # Заменяем старые данные новыми (избавляемся от дубликатов)
+        data[year][month] = month_data
+
+        # Записываем JSON в сжатый файл (с отступами)
+        with gzip.open(filename, 'wt', encoding='utf-8') as file:
+            json.dump(data, file, indent=4)  # Без сжатия строк, но в gzip
+
+        bot.reply_to(message, "Коды успешно записаны в файл (gzip).")
     except Exception as e:
         bot.reply_to(message, f"Произошла ошибка при записи кодов в файл: {e}")
 
-    print('Коды записаны!')
+    print('Коды записаны (gzip)!')
     debug_message(message, 'Коды были записаны в файл:')
+
 
 
 
@@ -943,7 +831,6 @@ def handle_rewrite_command(message):
         keyboard = types.InlineKeyboardMarkup()
         keyboard.add(types.InlineKeyboardButton(text="Photos", callback_data="rewrite_photos"))
         keyboard.add(types.InlineKeyboardButton(text="Videos", callback_data="rewrite_videos"))
-        #keyboard.add(types.InlineKeyboardButton(text="Logs Times", callback_data="rewrite_log_times"))
         
         bot.send_message(message.chat.id, "Выберите файл для перезаписи:", reply_markup=keyboard)
     except Exception as e:
@@ -954,37 +841,22 @@ def handle_rewrite_callback(call):
     try:
         if call.from_user.id != DEVELOPER_ID:
             bot.answer_callback_query(call.id, "У вас нет прав для использования этой команды.")
-            debug_message(call.message, f"Попытался использовать команду /перезаписать")
+            debug_message(call.message, f"Попытался изменить файл")
             return
 
         if call.data == 'rewrite_photos':
             file_path = 'photos.txt'
         elif call.data == 'rewrite_videos':
             file_path = 'videos.txt'
-        elif call.data == 'rewrite_log_times':
-            file_path = 'information.json'  # Обрабатываем JSON файл
         else:
             bot.answer_callback_query(call.id, "Неверный выбор.")
             debug_message(call.message, f"Неверный выбор файла для его перезаписи")
             return
 
-        current_content = None
-
-        if file_path == 'information.json':
-            # Для логов получаем текущие данные из JSON
-            current_content = read_log_times()
-            if not current_content:
-                current_content = "Файл пуст или логи не найдены."
-        else:
-            current_content = read_file_content(file_path)
-
-        if current_content is None:
-            bot.send_message(call.message.chat.id, f"Файл {file_path} не найден.")
-            debug_message(call.message, f"Файла для перезаписи содержимого не найден")
-            return
+        current_content = read_file_content(file_path)
 
         # Отправка текущего содержимого файла пользователю
-        bot.send_message(call.message.chat.id, f"{file_path}:\n\n{current_content}")
+        bot.send_message(call.message.chat.id, f"{current_content}")
         
         # Запрос нового содержимого у пользователя
         bot.send_message(call.message.chat.id, f"Отправьте новое содержимое для файла {file_path}.")
@@ -997,124 +869,35 @@ def process_new_content(message, file_path):
     try:
         new_content = message.text.strip()
 
-        if file_path == 'information.json':
-            # Для log_times нужно обработать JSON
-            new_log_times = [time.strip() for time in new_content.split(',') if time.strip()]
-
-            valid_times = []
-            time_pattern = re.compile(r"^\d{2}:\d{2}(:\d{2})?$")
-
-            for time in new_log_times:
-                if time_pattern.match(time):
-                    valid_times.append(time)
-                else:
-                    bot.send_message(message.chat.id, f"Неверный формат времени: {time}. Ожидается формат HH:MM или HH:MM:SS.")
-
-            if valid_times:
-                # Перезапись данных в JSON файл
-                write_log_times(valid_times)
-                bot.reply_to(message, f"Время логов успешно перезаписано: {', '.join(valid_times)}")
-            else:
-                bot.reply_to(message, "Не удалось сохранить корректное время. Попробуйте снова.")
-        
-        else:
-            # Для photos.txt и videos.txt обычная перезапись
-            rewrite_file(file_path, new_content)
-            bot.reply_to(message, f"Файл {file_path} успешно перезаписан.")
-
+        rewrite_file(file_path, new_content)
+        bot.reply_to(message, f"Файл {file_path} успешно перезаписан.")
         debug_message(message, f"Файл {file_path} успешно перезаписан")
-
-        # Перепланировать задачи, если файл log_times.txt был перезаписан
-        """if file_path == 'information.json':
-            schedule_log_sending()
-            bot.send_message(message.chat.id, "Расписание отправки логов обновлено.")"""
     
     except Exception as e:
         bot.reply_to(message, f"Произошла ошибка при перезаписи файла: {e}")
 
-def write_log_times(log_times):
-    """Перезапись времени логов в JSON файл."""
-    try:
-        data = {"log_times": log_times}
-        with open("information.json", "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-        bot.send_message(DEVELOPER_ID, "Время логов успешно обновлено.")
-    except Exception as e:
-        bot.send_message(DEVELOPER_ID, f"Ошибка при записи времени логов в файл: {e}")
 
 
 
-@bot.message_handler(commands=['кд_лог', 'cd_log'])
-def send_log_times(message):
-    handle_message(message)
-    
-    # Проверка прав доступа
-    if message.from_user.id != DEVELOPER_ID:
-        bot.reply_to(message, "У вас нет прав для использования этой команды.")
-        return
-
-    try:
-        log_times = read_log_times()  # Чтение времени из файла
-        if log_times:
-            formatted_times = '\n'.join(log_times)  # Форматирование времени для отправки
-            bot.reply_to(message, f"Время отправки логов:\n{formatted_times}")
-        else:
-            bot.reply_to(message, "Нет времени для отправки логов или файл пуст.")
-    except Exception as e:
-        bot.reply_to(message, f"Произошла ошибка при чтении времени логов: {e}")
 
 
-
-def send_logs():
-    try:
-        if os.path.exists(TEMP_LOG_FILE):
-            if os.path.getsize(TEMP_LOG_FILE) > 0:
-                with open(TEMP_LOG_FILE, 'rb') as temp_file:
-                    bot.send_document(DEVELOPER_ID, temp_file)
-                # Очищаем файл после отправки
-                with open(TEMP_LOG_FILE, 'w', encoding='utf-8') as temp_file:
-                    temp_file.write('')
-            else:
-                bot.send_message(DEVELOPER_ID, 'Бот работает! Файл temp_logs ПУСТОЙ!')
-        else:
-            bot.send_message(DEVELOPER_ID, 'Бот работает! Файла temp_logs НЕТ!')
-    except Exception as e:
-        bot.send_message(DEVELOPER_ID, f'Ошибка при отправке логов: {str(e)}')
-
-def read_log_times():
-    # Чтение времени отправки логов из JSON-файла.
-    if os.path.exists("information.json"):
-        with open("information.json", "r", encoding="utf-8") as f:
-            try:
-                data = json.load(f)
-                log_times = data.get("log_times", [])  # Получаем список времени логов
-
-                # Фильтрация корректных форматов времени
-                valid_times = []
-                time_pattern = re.compile(r"^\d{2}:\d{2}(:\d{2})?$")
-                for time in log_times:
-                    if time_pattern.match(time):
-                        valid_times.append(time)
-                    else:
-                        bot.send_message(DEVELOPER_ID, f"Неверный формат времени: {time}. Ожидается формат HH:MM или HH:MM:SS.")
-                return valid_times
-            except json.JSONDecodeError:
-                bot.send_message(DEVELOPER_ID, "Ошибка при чтении JSON файла.")
-                return []
-    return []
-
-"""def schedule_log_sending():
-    #Запланировать отправку логов на основе времени из файла.
-    schedule.clear()  # Очистить все запланированные задачи
-
-    times = read_log_times()
-    if not times:
-        bot.send_message(DEVELOPER_ID, 'Нет допустимого времени для отправки логов. Расписание не установлено.')
-        return
-
-    for log_time in times:
-        schedule.every().day.at(log_time).do(send_logs)"""
-
+# Создение БД
+def init_db():
+    # Создаёт таблицу пользователей (вызывать при запуске бота)
+    with sqlite3.connect('users.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY,
+                username TEXT,
+                name TEXT,
+                surname TEXT,
+                sanctions TEXT DEFAULT 'Нет',
+                survival_points INTEGER DEFAULT 0,
+                last_time TEXT DEFAULT ''
+            )
+        ''')
+        conn.commit()
 
 #######################################                       СТАРТ БОТА             ###################################
 # Бот запущен
@@ -1122,20 +905,5 @@ print('OK')
 
 # Вывод времени при старте бота
 print("Текущее время: ", get_current_time_in_timezone())
-
-# Запуск планировщика при старте
-#schedule_log_sending()
-
-# Запуск планировщика в отдельном потоке
-#def run_scheduler():
-#    while True:
-#        schedule.run_pending()
-
-#scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-#scheduler_thread.start()
-
-# Отправка логов при запуске бота
-# send_logs()
-
 
 bot.infinity_polling(none_stop=True)

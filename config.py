@@ -1,14 +1,9 @@
 API_TOKEN = '7154693387:AAGqSonvo0moS-CTON87M3i5tx4PIQmM37M'
-#CHANNEL_URL = 'https://t.me/KatomanD'
-#CHANNEL_ID = '@KatomanD'
-#CHAT_ID = '-1001969870941'
 DEVELOPER_ID = 1375077159
-#API_URL = "https://api.telegram.org/bot{}/sendMessage".format(token)
 LOG_FILE = 'logs.txt'
 TEMP_LOG_FILE = 'temp_logs.txt'
 CHECK_FOLDER = 'check/'
 INFO_FOLDER = 'info/'
-INFORMATION_FILE = "information.json"
 UPDATE_FOLDER = "gameUpdate/"
-BASE_URL = "https://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/"
 CODES_FOLDER = 'codes/'
+CONFIG_URL = "https://ldoestatic.cachefly.net/static/ldoez_config.json.gz"
