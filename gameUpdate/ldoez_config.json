@@ -4,13 +4,7 @@
 			"tag": "release_1.33.6",
 			"version_code": "1.33.6",
 			"platform": [
-				"android",
-				"ios",
-				"samsung",
-				"huawei",
-				"rustore",
-				"catappult",
-				"xiaomi"
+				"catappult"
 			],
 			"platform_overrides": {},
 			"package_id": "zombie.survival.craft.z",
@@ -25,12 +19,12 @@
 				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/bases/bases_1_16_3/"
 			],
 			"reference_urls": [
-				"http://ldoestatic.cachefly.net/static/n_r1884_d737193d38f9ea711088eef65f021a550bbc6da7.dat",
-				"http://cdn.gcore.ldoe-static.kefirgames.com/static/n_r1884_d737193d38f9ea711088eef65f021a550bbc6da7.dat",
-				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/n_r1884_d737193d38f9ea711088eef65f021a550bbc6da7.dat",
-				"http://cfg.cdn.ldoe.kefir.games/static/n_r1884_d737193d38f9ea711088eef65f021a550bbc6da7.dat"
+				"http://ldoestatic.cachefly.net/static/n_r1894_0505260880a0c0b27fc498dbdaebf7faa2ec5ed6.dat",
+				"http://cdn.gcore.ldoe-static.kefirgames.com/static/n_r1894_0505260880a0c0b27fc498dbdaebf7faa2ec5ed6.dat",
+				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/n_r1894_0505260880a0c0b27fc498dbdaebf7faa2ec5ed6.dat",
+				"http://cfg.cdn.ldoe.kefir.games/static/n_r1894_0505260880a0c0b27fc498dbdaebf7faa2ec5ed6.dat"
 			],
-			"reference_checksum": "56F6A3659DBD51F337B221545AA3FAF9",
+			"reference_checksum": "AB774F2EE01F89E1EC234E620F05B741",
 			"sync_reference_urls": [
 				"http://ldoestatic.cachefly.net/static/sync_references_client-221-68386c86.dat.gz",
 				"http://cdn.gcore.ldoe-static.kefirgames.com/static/sync_references_client-221-68386c86.dat.gz",
@@ -117,9 +111,9 @@
 			},
 			"yandex_notify_to_update": false
 		},
-		"324": {
-			"tag": "release_1.34.0_beta",
-			"version_code": "1.34.0",
+		"326": {
+			"tag": "release_1.34.1",
+			"version_code": "1.34.1",
 			"platform": [
 				"android",
 				"ios",
@@ -133,34 +127,41 @@
 			"package_id": "zombie.survival.craft.z",
 			"package_id_huawei": "zombie.survival.craft.z.huawei",
 			"host_urls": [
-				"http://beta.ldoe.kefirgames.ru/"
+				"http://user.ldoe.kefir.games/",
+				"http://n1-goo-nl.ldoe.kefir.games/",
+				"http://n2-gc-nl.ldoe.kefir.games/",
+				"http://n3-gc-lu.ldoe.kefir.games/"
 			],
 			"raid_locations_url": [
 				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/bases/bases_1_16_3/"
 			],
 			"reference_urls": [
-				"http://ldoestatic.cachefly.net/static/n_r1883_23b9b6e20172cc564d1513b29df5edf5051c047b.dat",
-				"http://cdn.gcore.ldoe-static.kefirgames.com/static/n_r1883_23b9b6e20172cc564d1513b29df5edf5051c047b.dat",
-				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/n_r1883_23b9b6e20172cc564d1513b29df5edf5051c047b.dat",
-				"http://cfg.cdn.ldoe.kefir.games/static/n_r1883_23b9b6e20172cc564d1513b29df5edf5051c047b.dat"
+				"http://ldoestatic.cachefly.net/static/n_r1905_d1078d66327861214986440e4ae2e22ecaa73eeb.dat",
+				"http://cdn.gcore.ldoe-static.kefirgames.com/static/n_r1905_d1078d66327861214986440e4ae2e22ecaa73eeb.dat",
+				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/n_r1905_d1078d66327861214986440e4ae2e22ecaa73eeb.dat",
+				"http://cfg.cdn.ldoe.kefir.games/static/n_r1905_d1078d66327861214986440e4ae2e22ecaa73eeb.dat"
 			],
-			"reference_checksum": "EA1F944BBFE21A9396BF9BEAE60E2E72",
+			"reference_checksum": "A9F0D8B988E93481F77F974997E2B4D8",
 			"sync_reference_urls": [
-				"http://storage.googleapis.com/ldoe-server-builds/beta/static/sync_references_client-239-c40183a4.dat.gz"
+				"http://ldoestatic.cachefly.net/static/sync_references_client-222-e2629d68.dat.gz",
+				"http://cdn.gcore.ldoe-static.kefirgames.com/static/sync_references_client-222-e2629d68.dat.gz",
+				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/sync_references_client-222-e2629d68.dat.gz",
+				"http://cfg.cdn.ldoe.kefir.games/static/sync_references_client-222-e2629d68.dat.gz"
 			],
-			"sync_reference_checksum": "39ce6f1c65eb58e43899b1c01822b877",
-			"check_reference_version": false,
+			"sync_reference_checksum": "af58593c03501571b730d65f4a9aed6b",
+			"check_reference_version": true,
 			"version_sync": "20",
-			"alpha_version": true,
+			"load_references_time_out": 40,
+			"alpha_version": false,
 			"show_loading_info": false,
 			"wait_save_time": 3,
 			"stream_button_settings": {
 				"ios": true
 			},
 			"patch_note_urls": [
-				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/p200.json.gz"
+				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/p201.json.gz"
 			],
-			"show_patch_note": false,
+			"show_patch_note": true,
 			"enable_news_button": true,
 			"store_replacement_settings": {
 				"enable": true,
@@ -170,7 +171,8 @@
 					2,
 					3
 				],
-				"r": []
+				"r": [],
+				"yoo": []
 			},
 			"project_auth_service": {
 				"timeout": 5,
@@ -201,8 +203,8 @@
 				"xsolla_token": "https://ops.p.kefir.games/projects/0dfb7f5b-1363-4a3a-8b3e-efe73b5e1f1d/integration/xsolla/payments/token",
 				"create_order": "https://ops.p.kefir.games/yandex-pay/v1/orders",
 				"create_order_timeout": 5,
-				"yookassa_order": "https://ops.p.kefirgames.ru/yookassa/order",
-				"yookassa_order_with_token": "https://ops.p.kefirgames.ru/yookassa/order-with-token"
+				"yookassa_order": "https://ops.p.kefir.games/yookassa/order",
+				"yookassa_order_with_token": "https://ops.p.kefir.games/yookassa/order-with-token"
 			},
 			"kefir_id": {
 				"sign_in_url": "https://launcher.kefirgames.com/oauth2/v1/signin",

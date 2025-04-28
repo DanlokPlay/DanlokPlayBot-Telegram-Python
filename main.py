@@ -7,8 +7,12 @@ from telebot import types
 import re
 import os
 
-from datetime import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
+from datetime import datetime, timedelta
 import pytz
+
+from parce_codes import download_image
+from read_codes import process_image
 
 import requests
 import gzip
@@ -19,6 +23,9 @@ import sqlite3
 token = API_TOKEN
 bot = telebot.TeleBot(token)
 TIMEZONE = pytz.timezone('Europe/Moscow')
+
+# Создаём планировщик задач
+scheduler = BackgroundScheduler()
 
 # Регистрация обработчика сообщений
 #@bot.message_handler(func=lambda message: message)  (Улавливает каждое сообщение)
@@ -140,7 +147,7 @@ def start(message):
     with open(path_file, 'r', encoding='utf-8') as file:
         start_text = file.read()
 
-    bot.send_message(message.chat.id, start_text)
+    bot.send_message(message.chat.id, start_text, message.message_thread_id)
 
     debug_message(message, 'Пользователь использовал /start')
     print("Пользователь использовал /start")
@@ -153,8 +160,9 @@ def thank_you(message):
     if not allow_command(message):
         return
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
 
-    bot.send_message(chat_id, "Тебе спасибо ^_^\n Теперь разработчик знает, что не зря время тратил :D")
+    bot.send_message(chat_id, "Тебе спасибо ^_^\n Теперь разработчик знает, что не зря время тратил :D", message_thread_id=thread_id)
     debug_message(message, 'Спасибо от ')
     print(f"Пользователь использовал /start")
 
@@ -165,18 +173,19 @@ def start_coins(message):
     if not allow_command(message):
         return
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
 
     var = random.randint(0, 1)
     heads = 'Орёл'
     tails = 'Решка'
     if var == 0:
-        bot.send_message(chat_id, f'{heads}', reply_to_message_id=message.id)
+        bot.send_message(chat_id, f'{heads}', reply_to_message_id=message.id, message_thread_id=thread_id)
 
         print(f"Подброс монеты сработал! ({heads})")
         debug_message(message, 'Монета подброшена (Орёл):')
         
     else:
-        bot.send_message(chat_id, f'{tails}', reply_to_message_id=message.id)
+        bot.send_message(chat_id, f'{tails}', reply_to_message_id=message.id, message_thread_id=thread_id)
 
         print(f"Подброс монеты сработал! ({tails})")
         debug_message(message, 'Монета подброшена (Решка):')
@@ -187,8 +196,9 @@ def send_random_phrase(message):
     if not allow_command(message):
         return
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
 
-    bot.send_message(chat_id, get_random_phrase())
+    bot.send_message(chat_id, get_random_phrase(), message_thread_id=thread_id)
 
     print('Запрошена случайная фраза') 
     debug_message(message, f'Запрошена случайная фраза')
@@ -203,13 +213,14 @@ def custom_commands(message):
     if not allow_command(message):
         return
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
     
     path_file = INFO_FOLDER + "info.txt"
 
     with open(path_file, 'r', encoding='utf-8') as file:
         info_custom_text = file.read()
 
-    bot.send_message(chat_id, info_custom_text, reply_to_message_id=message.id)
+    bot.send_message(chat_id, info_custom_text, reply_to_message_id=message.id, message_thread_id=thread_id)
     
     debug_message(message, 'Команды пользователей высланы')
     print("Информация о пользовательских командах выслана!")
@@ -221,13 +232,14 @@ def developer_commands(message):
     if not allow_command(message):
         return
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
     
     path_file = INFO_FOLDER + "developer.txt"
     
     with open(path_file, 'r', encoding='utf-8') as file:
         info_developer_text = file.read()
 
-    bot.send_message(chat_id, info_developer_text, reply_to_message_id=message.id)
+    bot.send_message(chat_id, info_developer_text, reply_to_message_id=message.id, message_thread_id=thread_id)
 
     debug_message(message, 'Команды разработчика высланы')
     print("Информация о командах разработчика выслана!")
@@ -239,6 +251,7 @@ def start_code(message):
     if not allow_command(message):
         return
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
 
     text = 'Код на сегодня выслан'
     
@@ -263,12 +276,12 @@ def start_code(message):
         day_codes = codes_data[current_year][current_month]
         if current_day in day_codes:
             daily_code = day_codes[current_day]
-            bot.send_message(chat_id, f"Текущий код:\n{daily_code}\nКоды на месяц: /codes")
+            bot.send_message(chat_id, f"Текущий код:\n{daily_code}\nКоды на месяц: /codes", message_thread_id=thread_id)
         else:
-            bot.send_message(chat_id, "Код на сегодня не найден.")
+            bot.send_message(chat_id, "Код на сегодня не найден. Попробуйте: /codes", message_thread_id=thread_id)
             text = 'Код на сегодня не найден'
     else:
-        bot.send_message(chat_id, "Коды на этот месяц не найдены.")
+        bot.send_message(chat_id, "Коды на этот месяц не найдены. Попробуйте: /codes", message_thread_id=thread_id)
         text = 'Коды на месяц не найдены'
 
     debug_message(message, text)
@@ -281,6 +294,7 @@ def start_codes(message):
     if not allow_command(message):
         return
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
     
     current_datetime = datetime.now()
     current_month = current_datetime.month
@@ -305,7 +319,7 @@ def start_codes(message):
     if month_name:
         filename = CODES_FOLDER + f'{month_name} {current_year}.png'
         with open(filename, 'rb') as file:
-            bot.send_photo(chat_id, file, f'Коды на {month_name} {current_year}')
+            bot.send_photo(chat_id, file, f'Коды на {month_name} {current_year}', message_thread_id=thread_id)
         print("Коды на месяцы высланы!")
         debug_message(message, 'Коды на месяц высланы')
     else:
@@ -318,13 +332,14 @@ def handle_videos_command(message):
     if not allow_command(message):
         return
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
     
     try:
         with open('videos.txt', 'r', encoding='utf-8') as file:
             content = file.read()
-            bot.send_message(chat_id, f"{content}")
+            bot.send_message(chat_id, f"{content}", message_thread_id=thread_id)
     except FileNotFoundError:
-        bot.reply_to(message, "Файл videos.txt не найден.")
+        bot.reply_to(message, "Файл videos.txt не найден.", message_thread_id=thread_id)
     except Exception as e:
         bot.reply_to(message, f"Произошла ошибка: {e}")
 
@@ -335,13 +350,14 @@ def list_photos_commads(message):
     if not allow_command(message):
         return
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
     
     with open('photos.txt', 'r', encoding='utf-8') as txt_file:
         photo_names = txt_file.readlines()
 
     if photo_names:
         photo_names_string = "".join(photo_names)
-        bot.send_message(message.chat.id, f"\n{photo_names_string}")
+        bot.send_message(chat_id, f"\n{photo_names_string}", message_thread_id=thread_id)
     else:
         bot.reply_to(message, "Нет загруженных фотографий.")
 
@@ -355,11 +371,12 @@ def bot_updates(message):
     if not allow_command(message):
         return
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
     
     path_file = INFO_FOLDER + "bot_updates.txt"
     
     with open(path_file, 'rb') as updates_file:
-        bot.send_document(chat_id, updates_file)
+        bot.send_document(chat_id, updates_file, message_thread_id=thread_id)
             
     debug_message(message, 'Просмотрены ВСЕ обновления')
     print('Обновления Бота отосланы!')
@@ -371,6 +388,7 @@ def last_updates(message):
     if not allow_command(message):
         return
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
 
     path_file = INFO_FOLDER + "last_bot_update.txt"
     path_photo = INFO_FOLDER + "last_bot_update.png"
@@ -379,7 +397,7 @@ def last_updates(message):
         updates_text = updates_file.read()
     
     with open(path_photo, 'rb') as photo_file:
-        bot.send_photo(chat_id, photo_file, caption=updates_text)
+        bot.send_photo(chat_id, photo_file, caption=updates_text, message_thread_id=thread_id)
             
     debug_message(message, 'Просмотрено последнее обновление')
     print('Последнее обновление Бота отослано!')
@@ -391,6 +409,7 @@ def top_users(message):
     if not allow_command(message):
         return
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
 
     # Открытие базы данных с использованием контекстного менеджера
     with sqlite3.connect('users.db') as conn:
@@ -410,7 +429,7 @@ def top_users(message):
     )
 
     # Отправка сообщения
-    bot.send_message(chat_id, top_message)
+    bot.send_message(chat_id, top_message, message_thread_id=thread_id)
     debug_message(message, f"Топ пользователей отосланы по загрузке фото:")
 
 
@@ -420,6 +439,7 @@ def send_apk(message):
     if not allow_command(message):
         return
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
     
     bot.send_message(
         chat_id,
@@ -428,7 +448,8 @@ def send_apk(message):
         "RuStore (Android 6.0):\n https://www.rustore.ru/catalog/app/com.DanlokPlay.LDoEBases\n\n"
         "Скачать Базы LDoE \n"
         "Сайт (с Android 5.1):\n https://ldoe.danlokplay.ru/Bases\n\n"
-        "Чат по игре: https://t.me/LastSurvivorsLDoE\n"
+        "Чат по игре: https://t.me/LastSurvivorsLDoE\n", 
+        message_thread_id=thread_id
     )
     debug_message(message, 'Отправлены ссылки на Базы LDoE')
     print('Отправлены ссылки на Базы LDoE')
@@ -443,6 +464,7 @@ def upload_photo(message):
     if not allow_command(message):
         return
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
     
     try:
         photo = message.reply_to_message.photo[-1]
@@ -453,7 +475,7 @@ def upload_photo(message):
         photo_name = capitalize_photo_name(photo_name)
 
         if os.path.exists(os.path.join(CHECK_FOLDER, f'{photo_name}.png')):
-            bot.reply_to(message, f"Фотография с названием '{photo_name}' уже существует в папке проверки. Пожалуйста, укажите другое имя.")
+            bot.reply_to(message, f"Фотография с названием '{photo_name}' уже существует в папке проверки. Пожалуйста, укажите другое имя.", message_thread_id=thread_id)
             debug_message(message, f"Фотография с названием '{photo_name}' уже существует в папке проверки:")
             return
 
@@ -465,7 +487,7 @@ def upload_photo(message):
         user_id = message.from_user.id
         user_name = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
 
-        bot.send_message(chat_id, "Фотография успешно загружена. Ожидайте проверки.")
+        bot.send_message(chat_id, "Фотография успешно загружена. Ожидайте проверки.", message_thread_id=thread_id)
         bot.send_photo(DEVELOPER_ID, file, caption=f"Новая фотография: {photo_name} (Загрузил: {user_name})", reply_markup=approve_keyboard(photo_name, user_id))
         debug_message(message, f"Новая фотография: {photo_name} (Загрузил: {user_name})")
 
@@ -603,11 +625,45 @@ def approve_keyboard(photo_name, user_id):
 def choice (message):
     if not allow_command(message):
         return
+    
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
 
-    send_photo_by_name_pc(message)
+    if len(message.text.split()) < 2:
+        bot.reply_to(message, "Вы не указали название фото.\n Примеры: /ф глок, /ф доставки", message_thread_id=thread_id)
+        debug_message(message, f"Не указано название фото:")
+        return
 
+    try:
+        photo_name = message.text.split(maxsplit=1)[1].capitalize()  # Название фото
+        
+        # Создаем список папок, в которых нужно искать фотографии
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        folders = [folder for folder in os.listdir(current_dir) if os.path.isdir(os.path.join(current_dir, folder))]
 
+        found_files = []  # инициализируем переменную found_files здесь
+
+        # Перебираем папки и ищем файлы в них
+        for folder in folders:
+            found_files += find_photo_in_folders(photo_name, folder)
+
+        if not found_files:
+            raise FileNotFoundError
+
+        # Отправляем фото пользователю
+        for found_file in found_files:
+            with open(found_file, 'rb') as photo_file:
+                bot.send_photo(message.chat.id, photo_file, f'{photo_name}', message_thread_id=thread_id)
+
+        # Отправляем уведомление
+        print('Фото отослано!')
+        debug_message(message, f'Фото {photo_name} было просмотрено')
+
+    except FileNotFoundError:
+        bot.reply_to(message, f"Фотография с названием '{photo_name}' не найдена.\nДля просмотра доступных фото напишите команду /кеф\n Примеры: /ф глок, /ф доставки", message_thread_id=thread_id)
+        debug_message(message, f'Нет фотографии с названием {photo_name}')
+    except Exception as e:
+        bot.reply_to(message, f"Произошла ошибка: {e}", message_thread_id=thread_id)
 
 def find_photo_in_folders(photo_name, folder):
     found_files = []
@@ -632,46 +688,11 @@ def find_photo_in_folders(photo_name, folder):
     return found_files
 
 
-def send_photo_by_name_pc(message):
-    if len(message.text.split()) < 2:
-        bot.reply_to(message, "Вы не указали название фото.\n Примеры: /ф глок, /ф доставки")
-        debug_message(message, f"Не указано название фото:")
-        return
-
-    try:
-        photo_name = message.text.split(maxsplit=1)[1].capitalize()  # Название фото
-        
-        # Создаем список папок, в которых нужно искать фотографии
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        folders = [folder for folder in os.listdir(current_dir) if os.path.isdir(os.path.join(current_dir, folder))]
-
-        found_files = []  # инициализируем переменную found_files здесь
-
-        # Перебираем папки и ищем файлы в них
-        for folder in folders:
-            found_files += find_photo_in_folders(photo_name, folder)
-
-        if not found_files:
-            raise FileNotFoundError
-
-        # Отправляем фото пользователю
-        for found_file in found_files:
-            with open(found_file, 'rb') as photo_file:
-                bot.send_photo(message.chat.id, photo_file, f'{photo_name}')
-
-        # Отправляем уведомление
-        print('Фото отослано!')
-        debug_message(message, f'Фото {photo_name} было просмотрено')
-
-    except FileNotFoundError:
-        bot.reply_to(message, f"Фотография с названием '{photo_name}' не найдена.\nДля просмотра доступных фото напишите команду /кеф\n Примеры: /ф глок, /ф доставки")
-        debug_message(message, f'Нет фотографии с названием {photo_name}')
-    except Exception as e:
-        bot.reply_to(message, f"Произошла ошибка: {e}")
 
 
 
 #####    ПРОВЕРКА Обновлений на СЕРВЕРЕ   ##########
+
 def download_and_extract_gz(url, output_file):
     """Скачивает и разархивирует .gz файл, возвращает JSON-данные."""
     response = requests.get(url)
@@ -716,7 +737,7 @@ def get_latest_versions():
     return versions_info
 
 
-def send_update_message(chat_id, versions):
+def send_update_message(chat_id, versions, thread_id):
     """Формирует и отправляет сообщение с информацией об обновлениях."""
     message = ""
     for version in versions:
@@ -729,15 +750,16 @@ def send_update_message(chat_id, versions):
             f"🇺🇸 <b>US:</b> {version['patch_data_us']}\n\n"
         )
 
-    bot.send_message(chat_id, message, parse_mode="HTML")
+    bot.send_message(chat_id, message, parse_mode="HTML", message_thread_id=thread_id)
 
 
 @bot.message_handler(commands=['update', 'обновление'])
 def handle_update_command(message):
     chat_id = message.chat.id
+    thread_id = message.message_thread_id
     versions = get_latest_versions()
     if versions:
-        send_update_message(chat_id, versions)
+        send_update_message(chat_id, versions, thread_id)
     else:
         bot.send_message(chat_id, "Не удалось получить информацию об обновлениях.")
 
@@ -748,14 +770,16 @@ def handle_update_command(message):
 @bot.message_handler(commands=['записать_коды'])
 def write_codes(message):
     handle_message(message)
+
+    thread_id = message.message_thread_id
     
     if message.from_user.id != DEVELOPER_ID:
-        bot.reply_to(message, "Извините, у вас нет прав на выполнение этой команды.")
+        bot.reply_to(message, "Извините, у вас нет прав на выполнение этой команды.", message_thread_id=thread_id)
         debug_message(message, 'Попытался записать коды: ')
         return
 
     if not message.reply_to_message or not message.reply_to_message.text:
-        bot.reply_to(message, "Не найдено сообщение для записи в файл.")
+        bot.reply_to(message, "Не найдено сообщение для записи в файл.", message_thread_id=thread_id)
         debug_message(message, 'Не найдено сообщение для записи в файл кодов: ')
         return
 
@@ -799,7 +823,7 @@ def write_codes(message):
                 else:
                     month_data[str(int(code_range))] = code
             else:
-                bot.reply_to(message, f"Ошибка в строке: {line}. Ожидаемый формат: 'диапазон : код'")
+                bot.reply_to(message, f"Ошибка в строке: {line}. Ожидаемый формат: 'диапазон : код'", message_thread_id=thread_id)
 
         # Заменяем старые данные новыми (избавляемся от дубликатов)
         data[year][month] = month_data
@@ -808,9 +832,9 @@ def write_codes(message):
         with gzip.open(filename, 'wt', encoding='utf-8') as file:
             json.dump(data, file, indent=4)  # Без сжатия строк, но в gzip
 
-        bot.reply_to(message, "Коды успешно записаны в файл (gzip).")
+        bot.reply_to(message, "Коды успешно записаны в файл (gzip).", message_thread_id=thread_id)
     except Exception as e:
-        bot.reply_to(message, f"Произошла ошибка при записи кодов в файл: {e}")
+        bot.reply_to(message, f"Произошла ошибка при записи кодов в файл: {e}", message_thread_id=thread_id)
 
     print('Коды записаны (gzip)!')
     debug_message(message, 'Коды были записаны в файл:')
@@ -822,9 +846,12 @@ def write_codes(message):
 @bot.message_handler(commands=['перезаписать', 'rewrite'])
 def handle_rewrite_command(message):
     handle_message(message)
+
+    thread_id = message.message_thread_id
+
     try:
         if message.from_user.id != DEVELOPER_ID:
-            bot.reply_to(message, "У вас нет прав для использования этой команды.")
+            bot.reply_to(message, "У вас нет прав для использования этой команды.", message_thread_id=thread_id)
             debug_message(message, f"Попытался использовать команду /перезаписать")
             return
 
@@ -832,12 +859,14 @@ def handle_rewrite_command(message):
         keyboard.add(types.InlineKeyboardButton(text="Photos", callback_data="rewrite_photos"))
         keyboard.add(types.InlineKeyboardButton(text="Videos", callback_data="rewrite_videos"))
         
-        bot.send_message(message.chat.id, "Выберите файл для перезаписи:", reply_markup=keyboard)
+        bot.send_message(message.chat.id, "Выберите файл для перезаписи:", reply_markup=keyboard, message_thread_id=thread_id)
     except Exception as e:
-        bot.reply_to(message, f"Произошла ошибка: {e}")
+        bot.reply_to(message, f"Произошла ошибка: {e}", message_thread_id=thread_id)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('rewrite_'))
 def handle_rewrite_callback(call):
+    thread_id = call.message.message_thread_id 
+
     try:
         if call.from_user.id != DEVELOPER_ID:
             bot.answer_callback_query(call.id, "У вас нет прав для использования этой команды.")
@@ -856,27 +885,57 @@ def handle_rewrite_callback(call):
         current_content = read_file_content(file_path)
 
         # Отправка текущего содержимого файла пользователю
-        bot.send_message(call.message.chat.id, f"{current_content}")
+        bot.send_message(call.message.chat.id, f"{current_content}", message_thread_id=thread_id)
         
         # Запрос нового содержимого у пользователя
-        bot.send_message(call.message.chat.id, f"Отправьте новое содержимое для файла {file_path}.")
-        bot.register_next_step_handler(call.message, process_new_content, file_path)
+        bot.send_message(call.message.chat.id, f"Отправьте новое содержимое для файла {file_path}.", message_thread_id=thread_id)
+        bot.register_next_step_handler(call.message, process_new_content, file_path, thread_id)
     
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"Произошла ошибка: {e}")
+        bot.send_message(call.message.chat.id, f"Произошла ошибка: {e}", message_thread_id=thread_id)
 
-def process_new_content(message, file_path):
+def process_new_content(message, file_path, thread_id):
     try:
         new_content = message.text.strip()
 
         rewrite_file(file_path, new_content)
-        bot.reply_to(message, f"Файл {file_path} успешно перезаписан.")
+        bot.reply_to(message, f"Файл {file_path} успешно перезаписан.", message_thread_id=thread_id)
         debug_message(message, f"Файл {file_path} успешно перезаписан")
     
     except Exception as e:
-        bot.reply_to(message, f"Произошла ошибка при перезаписи файла: {e}")
+        bot.reply_to(message, f"Произошла ошибка при перезаписи файла: {e}", message_thread_id=thread_id)
 
 
+
+
+# Функция, которая будет выполняться
+def scheduled_task():
+    print("⏳ Начинаем выполнение запланированной задачи...")
+    try:
+        download_image()
+        process_image()
+        print("✅ Задача выполнена успешно!")
+    except Exception as e:
+        print(f"❌ Ошибка при выполнении задачи: {e}")
+
+# Функция для расчёта следующей даты задачи
+def schedule_next_run():
+    now = datetime.now()
+    # Находим 1-е число следующего месяца
+    next_month = now.replace(day=28) + timedelta(days=4)
+    first_day_next_month = next_month.replace(day=1)
+
+    # Дата, когда надо запустить задачу — за 1 день до нового месяца
+    run_date = first_day_next_month - timedelta(days=1)
+    run_time = run_date.replace(hour=12, minute=0, second=0, microsecond=0)  # например, в 12:00 дня
+
+    print(f"⏰ Следующая задача запланирована на: {run_time}")
+
+    scheduler.add_job(scheduled_task, trigger='date', run_date=run_time, id='monthly_task')
+
+# Старт планировщика
+scheduler.start()
+schedule_next_run()
 
 
 
