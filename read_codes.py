@@ -3,6 +3,7 @@ import gzip
 from collections import defaultdict
 import google.generativeai as genai
 from datetime import datetime, timedelta
+from PIL import Image
 
 MONTHS_RU = [
     "январь", "февраль", "март", "апрель", "май", "июнь",
@@ -10,6 +11,15 @@ MONTHS_RU = [
 ]
 
 genai.configure(api_key="AIzaSyADRQY5Kx7KGMpYhGbMxg70kwmKny_SEB4")
+
+def compress_png_image(input_path, scale=0.5):
+    image = Image.open(input_path)
+    width, height = image.size
+    new_width = int(width * scale)
+    new_height = int(height * scale)
+    resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    resized_image.save(input_path, format='PNG', optimize=True)
+    print(f"Изображение сжато и сохранено: {input_path}")
 
 def process_image():
     model = genai.GenerativeModel(model_name="gemini-2.0-flash")
@@ -21,6 +31,9 @@ def process_image():
 
     filename = f"codes/{MONTHS_RU[next_month].capitalize()} {next_year}.png"
     image_path = filename
+
+    # Сжатие изображения перед обработкой
+    compress_png_image(image_path, scale=0.5)
 
     with open(image_path, 'rb') as f:
         image_bytes = f.read()

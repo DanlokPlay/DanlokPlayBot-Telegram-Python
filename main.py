@@ -673,7 +673,7 @@ def find_photo_in_folders(photo_name, folder):
         return found_files
 
     # Регулярное выражение для поиска файла с точным именем (игнорирование регистра)
-    pattern = re.compile(f"^{re.escape(photo_name)}\.png$", re.IGNORECASE)
+    pattern = re.compile(f"^{re.escape(photo_name)}\\.png$", re.IGNORECASE)
 
     # Перебираем файлы в текущей папке
     for filename in os.listdir(folder):
@@ -730,8 +730,7 @@ def get_latest_versions():
                 "tag": tag,
                 "version_number": version_number,  # Сохраняем номер версии
                 "patch_version": patch_version,
-                "patch_data_ru": patch_data.get("Russian", "Нет данных"),
-                "patch_data_us": patch_data.get("English", "No data")
+                "patch_data_ru": patch_data.get("Russian", "Нет данных")
             })
 
     return versions_info
@@ -739,17 +738,19 @@ def get_latest_versions():
 
 def send_update_message(chat_id, versions, thread_id):
     """Формирует и отправляет сообщение с информацией об обновлениях."""
-    message = ""
+    message = "<b>Обновления на сервере:</b>\n\n"
+    
     for version in versions:
         message += (
-            f"<b>Версия:</b> {version['version_code']}\n"
-            f"<b>Тег:</b> {version['tag']}\n"
-            f"<b>Обновление:</b> {version['version_number']}\n"  # Теперь выводим номер версии
-            f"<b>Патч:</b> {version['patch_version']}\n"
-            f"🇷🇺 <b>RU:</b> {version['patch_data_ru']}\n"
-            f"🇺🇸 <b>US:</b> {version['patch_data_us']}\n\n"
+            f"<b>🎯 Версия:</b> {version['version_code']}\n"
+            f"<b>🔖 Тег:</b> {version['tag']}\n"
+            f"<b>🔢 Номер версии:</b> {version['version_number']}\n"
+            f"<b>🔧 Патч:</b> {version['patch_version']}\n"
+            f"<b>📅 Содержание:</b>\n{version['patch_data_ru']}\n"
+            f"<b>-------------------------------------</b>\n"  # Разделитель между версиями
         )
 
+    # Отправка сообщения с улучшенным форматированием
     bot.send_message(chat_id, message, parse_mode="HTML", message_thread_id=thread_id)
 
 
@@ -917,26 +918,53 @@ def scheduled_task():
         print("✅ Задача выполнена успешно!")
     except Exception as e:
         print(f"❌ Ошибка при выполнении задачи: {e}")
+    finally:
+        # Перепланируем следующую задачу в любом случае
+        schedule_next_run()
 
 # Функция для расчёта следующей даты задачи
 def schedule_next_run():
-    now = datetime.now()
-    # Находим 1-е число следующего месяца
+    now = datetime.now(TIMEZONE)  # Получаем текущее время по МСК
+
+    # Определяем последний день текущего месяца
     next_month = now.replace(day=28) + timedelta(days=4)
     first_day_next_month = next_month.replace(day=1)
+    last_day_this_month = first_day_next_month - timedelta(days=1)
 
-    # Дата, когда надо запустить задачу — за 1 день до нового месяца
-    run_date = first_day_next_month - timedelta(days=1)
-    run_time = run_date.replace(hour=12, minute=0, second=0, microsecond=0)  # например, в 12:00 дня
+    # Планируем на последний день месяца по МСК
+    run_time = last_day_this_month.replace(hour=12, minute=0, second=0, microsecond=0, tzinfo=TIMEZONE)
 
-    print(f"⏰ Следующая задача запланирована на: {run_time}")
+    # Если уже поздно — берём последний день следующего месяца
+    if run_time <= now:
+        # Смещаемся ещё на месяц вперёд
+        future = first_day_next_month.replace(day=28) + timedelta(days=4)
+        first_day_after_next = future.replace(day=1)
+        last_day_next_month = first_day_after_next - timedelta(days=1)
 
-    scheduler.add_job(scheduled_task, trigger='date', run_date=run_time, id='monthly_task')
+        run_time = last_day_next_month.replace(hour=12, minute=0, second=0, microsecond=0, tzinfo=TIMEZONE)
+
+    # Проверка на существование задачи
+    job = scheduler.get_job('monthly_task')
+    if job and job.next_run_time and job.next_run_time > now:
+        print(f"⏳ Задача уже запланирована на: {job.next_run_time.strftime('%Y-%m-%d %H:%M:%S')} (МСК)")
+        return
+    elif job:
+        scheduler.remove_job('monthly_task')
+
+    # Выводим время в консоль без смещения
+    print(f"⏰ Новая задача запланирована на: {run_time.strftime('%Y-%m-%d %H:%M:%S')} (МСК)")
+
+    # Добавляем задачу в планировщик
+    scheduler.add_job(
+        scheduled_task,
+        trigger='date',
+        run_date=run_time,
+        id='monthly_task'
+    )
 
 # Старт планировщика
 scheduler.start()
 schedule_next_run()
-
 
 
 
