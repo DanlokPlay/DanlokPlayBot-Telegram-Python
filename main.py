@@ -440,15 +440,16 @@ def send_apk(message):
         return
     chat_id = message.chat.id
     thread_id = message.message_thread_id
-    
+
     bot.send_message(
         chat_id,
-        "Скачать Базы LDoE \n\n"
-        "AppGallery (Android 6.0):\n https://appgallery.huawei.ru/app/C111738085\n"
-        "RuStore (Android 6.0):\n https://www.rustore.ru/catalog/app/com.DanlokPlay.LDoEBases\n\n"
-        "Скачать Базы LDoE \n"
-        "Сайт (с Android 5.1):\n https://ldoe.danlokplay.ru/Bases\n\n"
-        "Чат по игре: https://t.me/LastSurvivorsLDoE\n", 
+        "<b>LDoE Bases</b> — Приложение для просмотра рейдерских баз в игре Last Day on Earth\n"
+        "🔑 <b><a href='https://play.google.com/store/apps/details?id=com.DanlokPlay.LDoEBases'>Google Play</a></b>\n"
+        "📦 <b><a href='https://www.rustore.ru/catalog/app/com.DanlokPlay.LDoEBases'>RuStore</a></b>\n"
+        "🧧 <b><a href='https://appgallery.huawei.ru/app/C111738085'>AppGallery</a></b>\n"
+        "📝 <b><a href='https://ldoe.danlokplay.ru/Bases/'>danlokplay.ru</a></b>\n\n"
+        "💬 <b><a href='https://t.me/LastSurvivorsLDoE'>Чат по игре</a></b>",
+        parse_mode='HTML',
         message_thread_id=thread_id
     )
     debug_message(message, 'Отправлены ссылки на Базы LDoE')

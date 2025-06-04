@@ -111,9 +111,9 @@
 			},
 			"yandex_notify_to_update": false
 		},
-		"326": {
-			"tag": "release_1.34.1",
-			"version_code": "1.34.1",
+		"329": {
+			"tag": "release_1.36.0",
+			"version_code": "1.36.0",
 			"platform": [
 				"android",
 				"ios",
@@ -136,19 +136,19 @@
 				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/bases/bases_1_16_3/"
 			],
 			"reference_urls": [
-				"http://ldoestatic.cachefly.net/static/n_r1905_d1078d66327861214986440e4ae2e22ecaa73eeb.dat",
-				"http://cdn.gcore.ldoe-static.kefirgames.com/static/n_r1905_d1078d66327861214986440e4ae2e22ecaa73eeb.dat",
-				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/n_r1905_d1078d66327861214986440e4ae2e22ecaa73eeb.dat",
-				"http://cfg.cdn.ldoe.kefir.games/static/n_r1905_d1078d66327861214986440e4ae2e22ecaa73eeb.dat"
+				"http://ldoestatic.cachefly.net/static/n_r1933_ba67e25c8d55aa858f8926d0ef934388e2468b02.dat",
+				"http://cdn.gcore.ldoe-static.kefirgames.com/static/n_r1933_ba67e25c8d55aa858f8926d0ef934388e2468b02.dat",
+				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/n_r1933_ba67e25c8d55aa858f8926d0ef934388e2468b02.dat",
+				"http://cfg.cdn.ldoe.kefir.games/static/n_r1933_ba67e25c8d55aa858f8926d0ef934388e2468b02.dat"
 			],
-			"reference_checksum": "A9F0D8B988E93481F77F974997E2B4D8",
+			"reference_checksum": "FA9CF0439CBFD44D97500B4DDFC77E81",
 			"sync_reference_urls": [
-				"http://ldoestatic.cachefly.net/static/sync_references_client-222-e2629d68.dat.gz",
-				"http://cdn.gcore.ldoe-static.kefirgames.com/static/sync_references_client-222-e2629d68.dat.gz",
-				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/sync_references_client-222-e2629d68.dat.gz",
-				"http://cfg.cdn.ldoe.kefir.games/static/sync_references_client-222-e2629d68.dat.gz"
+				"http://ldoestatic.cachefly.net/static/sync_references_client-223-28696cbf.dat.gz",
+				"http://cdn.gcore.ldoe-static.kefirgames.com/static/sync_references_client-223-28696cbf.dat.gz",
+				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/sync_references_client-223-28696cbf.dat.gz",
+				"http://cfg.cdn.ldoe.kefir.games/static/sync_references_client-223-28696cbf.dat.gz"
 			],
-			"sync_reference_checksum": "af58593c03501571b730d65f4a9aed6b",
+			"sync_reference_checksum": "2f57ee424e8e0688b5a9c971238409ae",
 			"check_reference_version": true,
 			"version_sync": "20",
 			"load_references_time_out": 40,
@@ -159,7 +159,7 @@
 				"ios": true
 			},
 			"patch_note_urls": [
-				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/p201.json.gz"
+				"http://ldoe-static.ams3.cdn.digitaloceanspaces.com/static/p204.json.gz"
 			],
 			"show_patch_note": true,
 			"enable_news_button": true,
